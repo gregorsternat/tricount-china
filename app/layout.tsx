@@ -1,20 +1,26 @@
 import type { Metadata, Viewport } from "next";
 
+import "@fontsource-variable/manrope";
+import "@fontsource-variable/noto-sans-sc";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Fēn · Partagez vos dépenses en Chine",
+  title: "Fēn · Mon année en Chine",
   description:
-    "Partagez les dépenses de votre groupe en RMB et sachez instantanément qui rembourse qui.",
+    "Importe WeChat Pay et Alipay, suis ton budget et partage les dépenses de tes tricounts en RMB.",
   applicationName: "Fēn",
+  icons: {
+    icon: "/assets/fen-logo-mark-v2.png",
+    apple: "/assets/fen-logo-mark-v2.png",
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: "cover",
-  themeColor: "#f6f3ed",
+  themeColor: "#f3f1e9",
 };
 
 export default function RootLayout({
@@ -23,7 +29,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="fr">
+    <html lang="fr" suppressHydrationWarning>
       <body>{children}</body>
     </html>
   );

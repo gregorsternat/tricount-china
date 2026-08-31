@@ -11,6 +11,19 @@
       "custom_domain": true
     }
   ],
+  "vars": {
+    "APP_ENV": "production",
+    "BETTER_AUTH_URL": "https://fen.gregor-sternat.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fen-tricount-china",
+      "database_id": "4818f84f-2742-4ece-8582-5034ed2e2a56",
+      "preview_database_id": "10ec2328-8ff9-4665-bef2-26d77a594ca1",
+      "migrations_dir": "migrations"
+    }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
@@ -23,5 +36,24 @@
   },
   "cache": {
     "enabled": true
+  },
+  "env": {
+    "preview": {
+      "name": "fen-tricount-china-preview",
+      "workers_dev": true,
+      "routes": [],
+      "vars": {
+        "APP_ENV": "preview",
+        "BETTER_AUTH_URL": "https://fen-tricount-china-preview.gregorsternat.workers.dev"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "fen-tricount-china-preview",
+          "database_id": "10ec2328-8ff9-4665-bef2-26d77a594ca1",
+          "migrations_dir": "migrations"
+        }
+      ]
+    }
   }
 }
