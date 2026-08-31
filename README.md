@@ -1,51 +1,95 @@
 # Fēn · 分
 
-Une application web mobile-first pour partager simplement les dépenses d'un groupe en Chine, calculer les remboursements et afficher l'équivalent RMB → EUR avec le taux de référence du jour.
+Fēn is a private, collaborative money dashboard for a student year in China. It combines Tricount-style group accounting with a personal WeChat Pay and Alipay wallet, then turns both into useful year-long analytics.
 
-## Fonctionnalités
+## What it does
 
-- plusieurs groupes et participants, sans compte à créer ;
-- dépenses en RMB avec payeur, date, catégorie, note et sous-groupe de bénéficiaires ;
-- partage à parts égales au fen près ou par montants exacts ;
-- modification, suppression confirmée et annulation immédiate ;
-- soldes nets et suggestions déterministes pour réduire le nombre de remboursements ;
-- enregistrement et annulation des remboursements ;
-- affichage CNY ou EUR, avec le dernier taux indicatif de la Banque centrale européenne ;
-- récapitulatif partageable dans WeChat et export JSON ;
-- interface responsive complète, animations Motion et respect de `prefers-reduced-motion`.
+- private email/password accounts for a small invited circle;
+- collaborative groups, members, equal splits, balances and settlements;
+- personal WeChat Pay and Alipay CSV/XLSX imports;
+- preview-before-import, duplicate detection, refunds, status handling and merchant/category normalization;
+- private-by-default wallet transactions with an explicit confirmation before sharing to a group;
+- yearly budget, monthly trend, category breakdown, top merchant, busiest day and recent activity;
+- responsive desktop/mobile UI, background refresh on focus/online and clear loading/offline/error states;
+- audit logs and idempotency protection for financial mutations.
 
-Les montants de référence restent toujours stockés en fen CNY entiers. L'EUR est une vue indicative et ne modifie jamais les comptes.
+All CNY amounts are stored as integer fen. Uploaded source files are parsed in memory and are not retained; normalized import previews expire after 15 minutes.
 
-## Démarrer
+## Architecture
 
-Prérequis : Node.js 22 ou une version compatible avec la plage déclarée dans `package.json`.
+- Next.js 16, React 19, TypeScript and Tailwind CSS 4;
+- Better Auth with the Drizzle adapter;
+- Cloudflare Workers through Vinext;
+- Cloudflare D1 and Drizzle ORM;
+- Recharts for the analytical views;
+- Vitest for domain, import, database-schema and security coverage.
+
+The D1 schema covers authentication, groups and memberships, invitations, expenses and shares, settlements, personal wallet transactions, import batches, budgets, FX rates, idempotency records and audit events.
+
+## Local development
+
+Requirements: Node.js 22+ and a Cloudflare account for the full authenticated stack.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Puis ouvrir [http://localhost:3000](http://localhost:3000).
+Without `BETTER_AUTH_SECRET`, `npm run dev` opens the realistic local design dataset at [http://localhost:3000](http://localhost:3000). This is useful for UI work without touching personal data.
 
-## Vérifier
+For the full Workers/D1 runtime, create an uncommitted `.dev.vars`:
+
+```dotenv
+BETTER_AUTH_SECRET=<at-least-32-random-characters>
+BETTER_AUTH_URL=http://localhost:3001
+PRIVATE_SIGNUP_EMAILS=owner@example.com
+PRIVATE_SIGNUP_BOOTSTRAP_TOKEN=<at-least-32-random-characters>
+```
+
+Then prepare and start the Vinext runtime:
+
+```bash
+npx wrangler d1 migrations apply DB --local
+npm run dev:vinext
+```
+
+The owner bootstrap URL is `/join?token=<PRIVATE_SIGNUP_BOOTSTRAP_TOKEN>&email=<allowlisted-email>`. After that first account exists, create groups and privately share the generated invitation links with friends. There is intentionally no email-delivery provider for this small private deployment.
+
+## Database changes
+
+```bash
+npx drizzle-kit check
+npx drizzle-kit generate
+npx wrangler d1 migrations apply DB --local
+```
+
+Never edit a migration that has already been applied remotely; add a new one.
+
+## Verification
 
 ```bash
 npm run lint
-npm run typecheck
-npm test
+npx next typegen && npm run typecheck
+npm test -- --run
+npx drizzle-kit check
+npx wrangler types --check
 npm run build
 ```
 
-## Données et taux de change
+## Cloudflare deployment
 
-Fēn est local-first : groupes, dépenses et remboursements sont sauvegardés dans le stockage local du navigateur. Aucune donnée personnelle n'est envoyée à un service applicatif. L'export JSON permet de conserver une sauvegarde ; il n'y a pas encore de synchronisation temps réel entre plusieurs appareils.
+The repository contains separate D1 bindings for preview and production.
 
-La route serveur `/api/exchange-rate` interroge la série officielle `EXR.D.CNY.EUR.SP00.A` de la BCE, inverse le nombre de CNY par EUR et conserve la réponse six heures. Le dernier taux valide est mis en cache dans le navigateur ; sans taux disponible, les comptes CNY continuent à fonctionner et l'affichage EUR est désactivé.
+```bash
+# Preview
+npx wrangler d1 migrations apply DB --remote --env preview
+npm run deploy:preview
 
-## Stack
+# Production
+npx wrangler d1 migrations apply DB --remote
+npm run deploy:vinext
+```
 
-- Next.js 16, React 19 et TypeScript ;
-- Tailwind CSS 4 et composants shadcn/ui ;
-- Motion pour les transitions de layout et micro-interactions ;
-- composants beUI distribués via le registre shadcn pour les nombres animés, boutons à état et toasts ;
-- Vitest pour les règles de partage, les soldes, le parsing monétaire et la source BCE.
+Configure `BETTER_AUTH_SECRET`, `PRIVATE_SIGNUP_EMAILS` and `PRIVATE_SIGNUP_BOOTSTRAP_TOKEN` with `wrangler secret put` in each environment. `BETTER_AUTH_URL` and the D1 bindings are declared in `wrangler.jsonc`; secrets must never be committed.
+
+Production is configured for `https://fen.gregor-sternat.com`. Preview uses the isolated `fen-tricount-china-preview` worker and D1 database.

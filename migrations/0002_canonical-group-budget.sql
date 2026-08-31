@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `budgets_one_active_group_unique` ON `budgets` (`group_id`) WHERE "budgets"."group_id" is not null and "budgets"."is_active" = 1;
