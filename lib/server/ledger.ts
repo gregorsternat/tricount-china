@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, type AppDatabase } from "../db/client";
@@ -10,7 +10,6 @@ import {
   expenses,
   expenseShares,
   groupMembers,
-  groups,
   settlements,
   walletTransactions,
 } from "../db/schema";
@@ -221,19 +220,6 @@ export async function createExpenseWithShares(
 ) {
   const input = expenseInputSchema.parse(inputValue);
   await requireGroupMembership(actorUserId, input.groupId, database);
-
-  const [groupPeriod] = await database
-    .select({ startsAt: groups.startsAt, endsAt: groups.endsAt })
-    .from(groups)
-    .where(eq(groups.id, input.groupId))
-    .limit(1);
-  if (!groupPeriod) throw notFound("Group not found.");
-  if (
-    (groupPeriod.startsAt && input.occurredAt < groupPeriod.startsAt) ||
-    (groupPeriod.endsAt && input.occurredAt > groupPeriod.endsAt)
-  ) {
-    throw conflict("The expense date must fall within the group period.");
-  }
 
   const uniqueMemberIds = new Set(input.shares.map((share) => share.memberId));
   if (uniqueMemberIds.size !== input.shares.length) {
@@ -695,17 +681,6 @@ export async function upsertBudget(
       throw conflict("A budget cannot be moved between personal and group scopes.");
     }
     isUpdate = true;
-  } else if (input.groupId) {
-    const [matchingGroupBudget] = await database
-      .select({ id: budgets.id })
-      .from(budgets)
-      .where(eq(budgets.groupId, input.groupId))
-      .orderBy(desc(budgets.isActive), desc(budgets.updatedAt), budgets.id)
-      .limit(1);
-    budgetId =
-      matchingGroupBudget?.id ??
-      (await stableEntityId("group-budget", input.groupId));
-    isUpdate = Boolean(matchingGroupBudget);
   } else {
     const [matchingBudget] = await database
       .select({ id: budgets.id })
@@ -716,14 +691,13 @@ export async function upsertBudget(
           input.groupId
             ? eq(budgets.groupId, input.groupId)
             : isNull(budgets.groupId),
-          eq(budgets.name, input.name),
           input.category
             ? eq(budgets.category, input.category)
             : isNull(budgets.category),
           eq(budgets.periodType, input.periodType ?? "month"),
           eq(budgets.isActive, true),
-          lte(budgets.startsAt, input.endsAt),
-          gte(budgets.endsAt, input.startsAt),
+          eq(budgets.startsAt, input.startsAt),
+          eq(budgets.endsAt, input.endsAt),
         ),
       )
       .orderBy(desc(budgets.updatedAt))
@@ -732,6 +706,15 @@ export async function upsertBudget(
       budgetId = matchingBudget.id;
       isUpdate = true;
     }
+    budgetId ??= await stableEntityId(
+      "budget",
+      ownerUserId,
+      input.groupId ?? "personal",
+      input.category ?? "total",
+      input.periodType ?? "month",
+      input.startsAt.toISOString(),
+      input.endsAt.toISOString(),
+    );
   }
   budgetId ??= crypto.randomUUID();
 

@@ -593,9 +593,18 @@ export const budgets = sqliteTable(
   (table) => [
     index("budgets_owner_period_idx").on(table.ownerUserId, table.startsAt),
     index("budgets_group_period_idx").on(table.groupId, table.startsAt),
-    uniqueIndex("budgets_one_active_group_unique")
-      .on(table.groupId)
-      .where(sql`${table.groupId} is not null and ${table.isActive} = 1`),
+    uniqueIndex("budgets_active_group_total_period_unique")
+      .on(table.groupId, table.periodType, table.startsAt, table.endsAt)
+      .where(sql`${table.groupId} is not null and ${table.category} is null and ${table.isActive} = 1`),
+    uniqueIndex("budgets_active_group_category_period_unique")
+      .on(table.groupId, table.category, table.periodType, table.startsAt, table.endsAt)
+      .where(sql`${table.groupId} is not null and ${table.category} is not null and ${table.isActive} = 1`),
+    uniqueIndex("budgets_active_personal_total_period_unique")
+      .on(table.ownerUserId, table.periodType, table.startsAt, table.endsAt)
+      .where(sql`${table.groupId} is null and ${table.category} is null and ${table.isActive} = 1`),
+    uniqueIndex("budgets_active_personal_category_period_unique")
+      .on(table.ownerUserId, table.category, table.periodType, table.startsAt, table.endsAt)
+      .where(sql`${table.groupId} is null and ${table.category} is not null and ${table.isActive} = 1`),
     check("budgets_amount_positive", sql`${table.amountFen} > 0`),
     check("budgets_date_range_check", sql`${table.endsAt} >= ${table.startsAt}`),
     check("budgets_alert_threshold_range", sql`${table.alertThresholdBasisPoints} > 0 and ${table.alertThresholdBasisPoints} <= 10000`),

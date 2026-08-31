@@ -168,12 +168,13 @@ interface CompilableD1Query {
 const CATEGORY_KEYWORDS: ReadonlyArray<
   readonly [DatabaseTransactionPayload["category"], readonly string[]]
 > = [
-  ["food", ["餐饮", "美食", "食品", "超市", "便利店", "外卖", "咖啡", "restaurant", "grocery", "coffee", "cafe", "hema", "盒马"]],
+  ["groceries", ["超市", "便利店", "生鲜", "买菜", "果蔬", "grocery", "groceries", "supermarket", "convenience store", "hema", "盒马", "carrefour", "aldi"]],
+  ["restaurant", ["餐饮", "美食", "餐厅", "饭店", "外卖", "火锅", "烧烤", "restaurant", "takeaway", "delivery", "hotpot", "meituan", "饿了么"]],
   ["transport", ["交通", "出行", "滴滴", "地铁", "公交", "铁路", "高铁", "单车", "taxi", "didi", "metro", "subway", "train", "rail"]],
   ["housing", ["房租", "租金", "水费", "电费", "燃气", "物业", "rent", "utilities", "accommodation"]],
   ["travel", ["旅行", "旅游", "酒店", "机票", "航空", "景点", "travel", "hotel", "flight"]],
   ["shopping", ["购物", "淘宝", "天猫", "京东", "商场", "shopping", "mall"]],
-  ["leisure", ["娱乐", "电影", "健身", "运动", "ktv", "cinema", "fitness", "game"]],
+  ["leisure", ["娱乐", "电影", "健身", "运动", "咖啡", "奶茶", "ktv", "cinema", "fitness", "game", "coffee", "cafe", "café"]],
   ["health", ["医疗", "医院", "药房", "药店", "health", "clinic", "hospital", "pharmacy"]],
 ];
 

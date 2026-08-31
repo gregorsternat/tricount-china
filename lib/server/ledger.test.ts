@@ -19,7 +19,7 @@ describe("budget persistence", () => {
     vi.clearAllMocks();
   });
 
-  it("updates an overlapping logical budget when no explicit id is provided", async () => {
+  it("updates the exact logical budget when its label changes and no explicit id is provided", async () => {
     const startsAt = new Date("2026-09-01T00:00:00+08:00");
     const endsAt = new Date("2027-06-30T23:59:59+08:00");
     const savedBudget = {
@@ -62,7 +62,7 @@ describe("budget persistence", () => {
     const result = await upsertBudget(
       "user-1",
       {
-        name: savedBudget.name,
+        name: "Renamed annual budget",
         periodType: "year",
         amountFen: savedBudget.amountFen,
         currency: "CNY",
@@ -74,7 +74,11 @@ describe("budget persistence", () => {
 
     expect(result.id).toBe(savedBudget.id);
     expect(budgetValues).toHaveBeenCalledWith(
-      expect.objectContaining({ id: savedBudget.id, amountFen: 250_000 }),
+      expect.objectContaining({
+        id: savedBudget.id,
+        name: "Renamed annual budget",
+        amountFen: 250_000,
+      }),
     );
     expect(auditValues).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -85,7 +89,7 @@ describe("budget persistence", () => {
     expect(batch).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the one canonical active group budget and requires the group owner", async () => {
+  it("updates the exact active group-period budget and requires the group owner", async () => {
     const startsAt = new Date("2026-09-01T00:00:00+08:00");
     const endsAt = new Date("2027-08-31T23:59:59+08:00");
     const savedBudget = {
@@ -201,7 +205,7 @@ describe("budget persistence", () => {
     expect(database.batch).not.toHaveBeenCalled();
   });
 
-  it("rejects a group expense outside the group's accounting period", async () => {
+  it("allows a group expense outside legacy group dates", async () => {
     vi.mocked(requireGroupMembership).mockResolvedValue({
       id: "member-1",
       groupId: "group-1",
@@ -209,37 +213,49 @@ describe("budget persistence", () => {
       role: "owner",
       status: "active",
     });
-    const limit = vi.fn(async () => [
-      {
-        startsAt: new Date("2026-09-01T00:00:00+08:00"),
-        endsAt: new Date("2027-08-31T23:59:59.999+08:00"),
-      },
-    ]);
     const select = vi.fn(() => ({
       from: vi.fn(() => ({
-        where: vi.fn(() => ({ limit })),
+        where: vi.fn(async () => [{ id: "member-1" }]),
       })),
     }));
-    const database = { select, batch: vi.fn() };
+    const expenseInsert = {
+      select: vi.fn(() => ({
+        onConflictDoNothing: vi.fn(() => ({ kind: "expense-insert" })),
+      })),
+    };
+    const shareInsert = {
+      values: vi.fn(() => ({
+        onConflictDoNothing: vi.fn(() => ({ kind: "share-insert" })),
+      })),
+    };
+    const auditInsert = {
+      select: vi.fn(() => ({
+        onConflictDoNothing: vi.fn(() => ({ kind: "audit-insert" })),
+      })),
+    };
+    const insert = vi
+      .fn()
+      .mockReturnValueOnce(expenseInsert)
+      .mockReturnValueOnce(shareInsert)
+      .mockReturnValueOnce(auditInsert);
+    const batch = vi.fn(async () => []);
+    const database = { select, insert, batch };
 
-    await expect(
-      createExpenseWithShares(
-        "user-1",
-        {
-          groupId: "group-1",
-          title: "Too late",
-          amountFen: 100,
-          occurredAt: new Date("2027-09-01T00:00:00+08:00"),
-          paidByMemberId: "member-1",
-          shares: [{ memberId: "member-1", amountFen: 100 }],
-        },
-        database as unknown as Parameters<typeof createExpenseWithShares>[2],
-      ),
-    ).rejects.toMatchObject({
-      status: 409,
-      message: "The expense date must fall within the group period.",
-    });
+    const result = await createExpenseWithShares(
+      "user-1",
+      {
+        groupId: "group-1",
+        title: "September dinner",
+        amountFen: 100,
+        occurredAt: new Date("2027-09-01T00:00:00+08:00"),
+        paidByMemberId: "member-1",
+        shares: [{ memberId: "member-1", amountFen: 100 }],
+      },
+      database as unknown as Parameters<typeof createExpenseWithShares>[2],
+    );
+
+    expect(result.id).toEqual(expect.any(String));
     expect(select).toHaveBeenCalledTimes(1);
-    expect(database.batch).not.toHaveBeenCalled();
+    expect(batch).toHaveBeenCalledTimes(1);
   });
 });

@@ -23,7 +23,7 @@ function parseEcbDailyRates(csv: string) {
   const cnyPerEur = Number(values[headers.indexOf("OBS_VALUE")]);
 
   if (!date || !Number.isFinite(cnyPerEur) || cnyPerEur <= 0) {
-    throw new Error("La réponse de la BCE ne contient pas de taux CNY valide.");
+    throw new Error("The ECB response does not contain a valid CNY rate.");
   }
 
   return { date, cnyPerEur };
@@ -38,7 +38,7 @@ export async function GET() {
     });
 
     if (!response.ok) {
-      throw new Error(`La BCE a répondu ${response.status}.`);
+      throw new Error(`The ECB responded with ${response.status}.`);
     }
 
     const { date, cnyPerEur } = parseEcbDailyRates(await response.text());

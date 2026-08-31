@@ -13,9 +13,9 @@ describe("parseEcbDailyRates", () => {
     expect(1 / parsed.cnyPerEur).toBeCloseTo(0.127794, 6);
   });
 
-  it("refuse une réponse incomplète", () => {
+  it("rejects an incomplete response", () => {
     expect(() => __testables.parseEcbDailyRates("<Cube />")).toThrow(
-      /taux CNY valide/,
+      /valid CNY rate/,
     );
   });
 });

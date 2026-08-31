@@ -1,12 +1,16 @@
 import { z } from "zod";
 
+import { isMonthKey } from "@/lib/dashboard/period";
 import { requireAuthenticatedUser } from "@/lib/server/auth-session";
 import { idempotentJson } from "@/lib/server/idempotent-json";
 import { requireSameOrigin, toErrorResponse } from "@/lib/server/request-security";
 import { getUiDashboardSnapshot } from "@/lib/server/ui-dashboard";
 import { shareWalletTransactionWithGroup } from "@/lib/server/wallet-sharing";
 
-const bodySchema = z.object({ groupId: z.string().min(1).max(160) });
+const bodySchema = z.object({
+  groupId: z.string().min(1).max(160),
+  month: z.string().refine(isMonthKey, "Invalid month.").optional(),
+});
 
 export async function POST(
   request: Request,
@@ -33,14 +37,15 @@ export async function POST(
         const snapshot = await getUiDashboardSnapshot(
           viewer,
           "personal",
-          body.groupId,
+          undefined,
+          body.month,
         );
         return {
           body: {
             snapshot,
             message: result.replayed
-              ? "Cette opération était déjà partagée."
-              : "Opération partagée et soldes recalculés.",
+              ? "This payment was already shared."
+              : "Payment shared and balances updated.",
           },
           resourceType: "expense",
           resourceId: result.expenseId,

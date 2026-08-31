@@ -7,6 +7,7 @@ import { FormEvent, useMemo, useState } from "react";
 
 import { FormStatus } from "@/components/auth/form-status";
 import { PasswordField } from "@/components/auth/password-field";
+import { useI18n } from "@/components/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,10 +17,11 @@ import {
   AUTH_MAX_PASSWORD_LENGTH,
   AUTH_MIN_PASSWORD_LENGTH,
   buildAuthHref,
-  getAuthErrorMessage,
+  getAuthErrorKey,
   safeRedirectPath,
 } from "./auth-utils";
 import { claimInvitationWithRetry } from "./invitation-claim";
+import type { AuthErrorMessageKey } from "@/lib/i18n/messages/types";
 
 interface SignUpFormProps {
   readonly invitationToken?: string;
@@ -30,20 +32,22 @@ interface SignUpFormProps {
 type SubmitState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "claim-error"; message: string }
-  | { kind: "error"; message: string }
-  | { kind: "success"; message: string };
+  | { kind: "claim-error" }
+  | { kind: "error"; messageKey: AuthErrorMessageKey }
+  | { kind: "success" };
 
 export function SignUpForm({
   invitationToken,
   initialEmail = "",
   nextPath = "/",
 }: SignUpFormProps) {
+  const { messages } = useI18n();
+  const copy = messages.auth.join;
   const router = useRouter();
   const destination = safeRedirectPath(nextPath);
   const emailLocked = Boolean(invitationToken && initialEmail);
   const [email, setEmail] = useState(initialEmail);
-  const [passwordError, setPasswordError] = useState<string>();
+  const [passwordMismatch, setPasswordMismatch] = useState(false);
   const [accountCreated, setAccountCreated] = useState(false);
   const [state, setState] = useState<SubmitState>({ kind: "idle" });
   const pending = state.kind === "loading" || state.kind === "success";
@@ -61,25 +65,21 @@ export function SignUpForm({
   async function finishInvitationClaim() {
     if (invitationToken) await claimInvitationWithRetry(invitationToken);
 
-    setState({ kind: "success", message: "Compte créé. Bienvenue dans ton espace Fēn…" });
+    setState({ kind: "success" });
     router.replace(destination);
     router.refresh();
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPasswordError(undefined);
+    setPasswordMismatch(false);
 
     if (accountCreated) {
       setState({ kind: "loading" });
       try {
         await finishInvitationClaim();
       } catch {
-        setState({
-          kind: "claim-error",
-          message:
-            "Ton compte est créé, mais l’invitation n’a pas pu être activée. Vérifie ta connexion puis réessaie.",
-        });
+        setState({ kind: "claim-error" });
       }
       return;
     }
@@ -89,7 +89,7 @@ export function SignUpForm({
     const passwordConfirmation = String(formData.get("passwordConfirmation") ?? "");
 
     if (password !== passwordConfirmation) {
-      setPasswordError("Les deux mots de passe ne correspondent pas.");
+      setPasswordMismatch(true);
       setState({ kind: "idle" });
       return;
     }
@@ -107,7 +107,7 @@ export function SignUpForm({
       if (result.error) {
         setState({
           kind: "error",
-          message: getAuthErrorMessage(result.error, "sign-up"),
+          messageKey: getAuthErrorKey(result.error, "sign-up"),
         });
         return;
       }
@@ -116,16 +116,12 @@ export function SignUpForm({
       try {
         await finishInvitationClaim();
       } catch {
-        setState({
-          kind: "claim-error",
-          message:
-            "Ton compte est créé, mais l’invitation n’a pas pu être activée. Vérifie ta connexion puis réessaie.",
-        });
+        setState({ kind: "claim-error" });
       }
     } catch (error) {
       setState({
         kind: "error",
-        message: getAuthErrorMessage(error, "sign-up"),
+        messageKey: getAuthErrorKey(error, "sign-up"),
       });
     }
   }
@@ -142,14 +138,14 @@ export function SignUpForm({
         <KeyRound className="mt-0.5 size-4 shrink-0" aria-hidden />
         <span>
           {invitationToken
-            ? "Lien privé détecté. Crée ton compte pour ouvrir ton espace ou rejoindre le groupe."
-            : "Inscription privée : demande un lien d’accès à un membre du groupe."}
+            ? copy.invitationDetected
+            : copy.privateSignup}
         </span>
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="sign-up-name" className="text-[13px] font-semibold text-[#284b42]">
-          Prénom ou surnom
+          {copy.nameLabel}
         </Label>
         <Input
           id="sign-up-name"
@@ -167,7 +163,7 @@ export function SignUpForm({
 
       <div className="space-y-2">
         <Label htmlFor="sign-up-email" className="text-[13px] font-semibold text-[#284b42]">
-          Email
+          {copy.emailLabel}
         </Label>
         <Input
           id="sign-up-email"
@@ -183,12 +179,12 @@ export function SignUpForm({
           onChange={(event) => setEmail(event.target.value)}
           disabled={fieldsDisabled}
           aria-describedby={emailLocked ? "invitation-email-description" : undefined}
-          placeholder="toi@exemple.com"
+          placeholder={copy.emailPlaceholder}
           className="h-12 rounded-[14px] border-[#173f35]/15 bg-white px-4 text-[15px] shadow-none placeholder:text-[#6b7a72] focus-visible:border-[#466c60] focus-visible:ring-[#c9ff63]/65 read-only:bg-[#f1f2eb] read-only:text-[#52675d]"
         />
         {emailLocked ? (
           <p id="invitation-email-description" className="text-xs leading-5 text-[#5d6f66]">
-            Cette adresse est liée à ton invitation.
+            {copy.emailLocked}
           </p>
         ) : null}
       </div>
@@ -196,29 +192,35 @@ export function SignUpForm({
       <PasswordField
         id="sign-up-password"
         name="password"
-        label="Mot de passe"
+        label={copy.passwordLabel}
         autoComplete="new-password"
         minLength={AUTH_MIN_PASSWORD_LENGTH}
         maxLength={AUTH_MAX_PASSWORD_LENGTH}
         disabled={fieldsDisabled}
-        description={`${AUTH_MIN_PASSWORD_LENGTH} caractères minimum. Utilise un mot de passe unique.`}
+        description={copy.passwordDescription}
       />
 
       <PasswordField
         id="sign-up-password-confirmation"
         name="passwordConfirmation"
-        label="Confirmer le mot de passe"
+        label={copy.confirmPasswordLabel}
         autoComplete="new-password"
         minLength={AUTH_MIN_PASSWORD_LENGTH}
         maxLength={AUTH_MAX_PASSWORD_LENGTH}
         disabled={fieldsDisabled}
-        error={passwordError}
+        error={passwordMismatch ? copy.passwordMismatch : undefined}
       />
 
       {state.kind === "error" || state.kind === "claim-error" || state.kind === "success" ? (
         <FormStatus
           kind={state.kind === "claim-error" ? "error" : state.kind}
-          message={state.message}
+          message={
+            state.kind === "error"
+              ? messages.auth.errors[state.messageKey]
+              : state.kind === "claim-error"
+                ? copy.claimError
+                : copy.success
+          }
         />
       ) : null}
 
@@ -231,26 +233,26 @@ export function SignUpForm({
           <>
             <LoaderCircle className="size-4 animate-spin" aria-hidden />
             {state.kind === "success"
-              ? "Ouverture…"
+              ? copy.opening
               : accountCreated
-                ? "Activation…"
-                : "Création…"}
+                ? copy.activating
+                : copy.creating}
           </>
         ) : (
           <>
-            {accountCreated ? "Réessayer l’activation" : "Créer mon compte"}
+            {accountCreated ? copy.retryActivation : copy.submit}
             <ArrowRight className="size-4" aria-hidden />
           </>
         )}
       </Button>
 
       <p className="border-t border-[#173f35]/10 pt-5 text-center text-sm leading-6 text-[#66786f]">
-        Tu as déjà un compte ?{" "}
+        {copy.existingAccount}{" "}
         <Link
           href={loginHref}
           className="font-semibold text-[#173f35] underline decoration-[#95bd47] decoration-2 underline-offset-4 outline-none hover:text-[#386655] focus-visible:rounded focus-visible:ring-2 focus-visible:ring-[#77a52a]"
         >
-          Se connecter
+          {copy.signIn}
         </Link>
       </p>
     </form>

@@ -1,10 +1,20 @@
 import "server-only";
 
+import { normalizeTransactionCategory } from "@/lib/dashboard/category";
+import {
+  currentMonthKey,
+  dayCount,
+  isoDate,
+  monthKeysEndingAt,
+  monthPeriod,
+  shiftMonth,
+} from "@/lib/dashboard/period";
 import type {
   CategorySpend,
   DashboardScope,
   DashboardSnapshot,
   DashboardTransaction,
+  DailySpend,
   MonthlySpend,
   TransactionCategory,
   TransactionSource,
@@ -13,42 +23,42 @@ import type { getDashboardSnapshot } from "@/lib/server/dashboard";
 
 type RawDashboard = Awaited<ReturnType<typeof getDashboardSnapshot>>;
 
-const categoryMeta: Record<TransactionCategory, { label: string; color: string }> = {
-  food: { label: "Restaurants & courses", color: "#173f35" },
-  housing: { label: "Logement", color: "#8fcf52" },
-  travel: { label: "Voyages", color: "#e9945e" },
-  transport: { label: "Transports", color: "#8acac2" },
-  shopping: { label: "Shopping", color: "#d9ba76" },
-  leisure: { label: "Loisirs", color: "#a89ac7" },
-  health: { label: "Santé", color: "#d58883" },
-  other: { label: "Autres", color: "#e8dfce" },
-};
-
-const monthLabels = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
-
 export function adaptDashboardSnapshot({
   raw,
+  trendRaw = raw,
   viewer,
   scope,
+  month,
   requestedGroupId,
   now = new Date(),
 }: {
   readonly raw: RawDashboard;
+  readonly trendRaw?: RawDashboard;
   readonly viewer: { id: string; name: string; email: string; image: string | null };
   readonly scope: DashboardScope;
+  readonly month: string;
   readonly requestedGroupId?: string;
   readonly now?: Date;
 }): DashboardSnapshot {
-  const period = resolveAcademicPeriod(raw, now);
+  const selectedPeriod = monthPeriod(month);
   const group = scope === "group" ? raw.group : null;
+  const trendGroup = scope === "group" ? trendRaw.group : null;
   const spendingByDate = group?.analytics.byDate ?? raw.wallet.byDate;
-  const spentFen = group?.analytics.totalExpensesFen ?? raw.wallet.totalSpentFen;
-  const budget = selectBudget(raw, scope);
-  const budgetFen = budget?.amountFen ?? 0;
-  const monthly = buildMonthlySpend(spendingByDate, period.startsOn, budgetFen);
+  const trendByDate = trendGroup?.analytics.byDate ?? trendRaw.wallet.byDate;
   const categoryValues = group?.analytics.byCategory ?? raw.wallet.byCategory;
-  const categories = buildCategories(categoryValues);
+  const categoryCounts = group?.analytics.categoryCounts ?? raw.wallet.categoryCounts;
+  const spentFen = group?.analytics.totalExpensesFen ?? raw.wallet.totalSpentFen;
+  const budget = selectBudget(raw, scope, month);
+  const budgetFen = budget?.amountFen ?? 0;
   const selectedGroupId = group?.id ?? (scope === "group" ? requestedGroupId : undefined);
+  const today = isoDate(now);
+  const isCurrentMonth = month === currentMonthKey(now);
+  const elapsedDays = isCurrentMonth ? Number(today.slice(-2)) : dayCount(month);
+  const remainingDays = isCurrentMonth
+    ? Math.max(1, dayCount(month) - elapsedDays + 1)
+    : 0;
+  const restaurantSpendFen = categoryValues.restaurant ?? 0;
+  const restaurantPaymentCount = categoryCounts.restaurant ?? 0;
 
   return {
     viewer: {
@@ -67,15 +77,36 @@ export function adaptDashboardSnapshot({
       accent: item.color,
     })),
     selectedGroupId,
-    academicYear: period,
+    period: {
+      key: month,
+      startsOn: selectedPeriod.startsOn,
+      endsOn: selectedPeriod.endsOn,
+      isCurrentMonth,
+    },
     spentFen,
     budgetFen,
-    previousPeriodDelta: null,
-    monthly,
-    categories,
+    metrics: {
+      previousMonthDelta: calculatePreviousMonthDelta(trendByDate, month, now),
+      averageDailySpendFen: elapsedDays > 0 ? Math.round(spentFen / elapsedDays) : null,
+      availablePerDayFen:
+        budgetFen > 0 && remainingDays > 0
+          ? Math.round(Math.max(0, budgetFen - spentFen) / remainingDays)
+          : null,
+      restaurantSpendFen,
+      restaurantPaymentCount,
+      averageRestaurantPaymentFen:
+        restaurantPaymentCount > 0
+          ? Math.round(restaurantSpendFen / restaurantPaymentCount)
+          : null,
+      groceriesSpendFen: categoryValues.groceries ?? 0,
+      legacyFoodSpendFen: categoryValues.food ?? 0,
+    },
+    trend: buildMonthlyTrend(trendByDate, month, now),
+    daily: buildDailySpend(spendingByDate, month, now),
+    categories: buildCategories(categoryValues),
     transactions: group
       ? groupTransactions(group)
-      : walletTransactions(raw.wallet.recentTransactions),
+      : walletTransactions(raw.wallet.recentTransactions, viewer.name),
     balances: group
       ? group.members.map((member) => ({
           id: member.id,
@@ -91,81 +122,90 @@ export function adaptDashboardSnapshot({
     topMerchant: group
       ? topGroupExpense(group.expenses)
       : topWalletMerchant(raw.wallet.topMerchants),
-    busiestDay: topWeekday(group?.analytics.byWeekday ?? raw.wallet.byWeekday),
+    biggestDay: normalizeBiggestDay(group?.analytics.biggestDay ?? raw.wallet.biggestDay),
     generatedAt: now.toISOString(),
     revision: Math.max(1, Math.floor(now.getTime() / 1_000)),
   };
 }
 
-function resolveAcademicPeriod(raw: RawDashboard, now: Date) {
-  const group = raw.group;
-  const timezone = group?.timezone ?? "Asia/Shanghai";
-  const suppliedStart = raw.period.from ?? group?.startsAt ?? null;
-  const suppliedEnd = raw.period.to ?? group?.endsAt ?? null;
-
-  const [currentYear, currentMonth] = isoDate(now, timezone)
-    .split("-")
-    .map(Number);
-  const startYear = currentMonth >= 9 ? currentYear : currentYear - 1;
-  const startsOn = suppliedStart ?? new Date(`${startYear}-09-01T00:00:00+08:00`);
-  const endsOn = suppliedEnd ?? new Date(`${startYear + 1}-08-31T23:59:59.999+08:00`);
-  const startsOnDate = isoDate(startsOn, timezone);
-  const endsOnDate = isoDate(endsOn, timezone);
-  const label =
-    group?.academicYearLabel ||
-    `${startsOnDate.slice(0, 4)}–${endsOnDate.slice(0, 4)}`;
-
-  return {
-    label,
-    startsOn: startsOnDate,
-    endsOn: endsOnDate,
-  };
+function buildMonthlyTrend(
+  byDate: Record<string, number>,
+  month: string,
+  now: Date,
+): MonthlySpend[] {
+  const current = currentMonthKey(now);
+  return monthKeysEndingAt(month, 6).map((key) => ({
+    key,
+    spentFen: sumMonth(byDate, key),
+    observed: key <= current,
+  }));
 }
 
-function buildMonthlySpend(
+function buildDailySpend(
   byDate: Record<string, number>,
-  startsOn: string,
-  annualBudgetFen: number,
-): MonthlySpend[] {
-  const [year, month] = startsOn.split("-").map(Number);
-  const months = Array.from({ length: 12 }, (_, index) => {
-    const date = new Date(Date.UTC(year, month - 1 + index, 1));
-    const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-    const spentFen = Object.entries(byDate)
-      .filter(([dateKey]) => dateKey.startsWith(`${key}-`))
-      .reduce((sum, [, amountFen]) => sum + amountFen, 0);
+  month: string,
+  now: Date,
+): DailySpend[] {
+  const current = currentMonthKey(now);
+  const todayDay = Number(isoDate(now).slice(-2));
+  return Array.from({ length: dayCount(month) }, (_, index) => {
+    const day = index + 1;
+    const key = `${month}-${String(day).padStart(2, "0")}`;
     return {
       key,
-      label: monthLabels[date.getUTCMonth()] ?? key,
-      spentFen,
-      budgetFen: annualBudgetFen > 0 ? Math.round(annualBudgetFen / 12) : 0,
-      observed: spentFen > 0,
+      day,
+      spentFen: byDate[key] ?? 0,
+      observed: month < current || (month === current && day <= todayDay),
     };
   });
+}
 
-  return months;
+function calculatePreviousMonthDelta(
+  byDate: Record<string, number>,
+  month: string,
+  now: Date,
+): number | null {
+  const previousMonth = shiftMonth(month, -1);
+  const isCurrent = month === currentMonthKey(now);
+  const availableCurrentDays = isCurrent
+    ? Number(isoDate(now).slice(-2))
+    : dayCount(month);
+  const comparableDays = Math.min(
+    availableCurrentDays,
+    dayCount(month),
+    dayCount(previousMonth),
+  );
+  const currentFen = sumMonthThroughDay(byDate, month, comparableDays);
+  const previousFen = sumMonthThroughDay(byDate, previousMonth, comparableDays);
+  return previousFen > 0 ? (currentFen - previousFen) / previousFen : null;
+}
+
+function sumMonth(byDate: Record<string, number>, month: string): number {
+  return Object.entries(byDate)
+    .filter(([key]) => key.startsWith(`${month}-`))
+    .reduce((sum, [, amountFen]) => sum + amountFen, 0);
+}
+
+function sumMonthThroughDay(
+  byDate: Record<string, number>,
+  month: string,
+  lastDay: number,
+): number {
+  return Object.entries(byDate)
+    .filter(([key]) => key.startsWith(`${month}-`) && Number(key.slice(-2)) <= lastDay)
+    .reduce((sum, [, amountFen]) => sum + amountFen, 0);
 }
 
 function buildCategories(values: Record<string, number>): CategorySpend[] {
   const normalized = new Map<TransactionCategory, number>();
   for (const [rawCategory, amountFen] of Object.entries(values)) {
-    const category = normalizeCategory(rawCategory);
+    const category = normalizeTransactionCategory(rawCategory);
     normalized.set(category, (normalized.get(category) ?? 0) + amountFen);
   }
-
-  const ranked = [...normalized.entries()]
+  return [...normalized.entries()]
     .filter(([, amountFen]) => amountFen > 0)
-    .sort((left, right) => right[1] - left[1]);
-  if (ranked.length <= 5) {
-    return ranked.map(([category, amountFen]) => ({ category, amountFen, ...categoryMeta[category] }));
-  }
-
-  const leading = ranked.slice(0, 4);
-  const otherFen = ranked.slice(4).reduce((sum, [, amountFen]) => sum + amountFen, 0);
-  return [
-    ...leading.map(([category, amountFen]) => ({ category, amountFen, ...categoryMeta[category] })),
-    { category: "other", amountFen: otherFen, ...categoryMeta.other },
-  ];
+    .sort((left, right) => right[1] - left[1])
+    .map(([category, amountFen]) => ({ category, amountFen }));
 }
 
 function groupTransactions(group: NonNullable<RawDashboard["group"]>): DashboardTransaction[] {
@@ -176,9 +216,12 @@ function groupTransactions(group: NonNullable<RawDashboard["group"]>): Dashboard
     merchant: expense.notes || expense.title,
     occurredAt: expense.occurredAt.toISOString(),
     amountFen: expense.amountBaseFen ?? expense.amountFen,
-    category: normalizeCategory(expense.category),
+    category: normalizeTransactionCategory(
+      expense.category,
+      `${expense.title} ${expense.notes ?? ""}`,
+    ),
     source: normalizeSource(expense.source),
-    paidBy: memberNames.get(expense.paidByMemberId) ?? "Membre",
+    paidBy: memberNames.get(expense.paidByMemberId) ?? "—",
     groupId: group.id,
     shared: true,
     note: expense.notes ?? undefined,
@@ -187,6 +230,7 @@ function groupTransactions(group: NonNullable<RawDashboard["group"]>): Dashboard
 
 function walletTransactions(
   rows: RawDashboard["wallet"]["recentTransactions"],
+  viewerName: string,
 ): DashboardTransaction[] {
   return rows.map((transaction) => ({
     id: transaction.id,
@@ -195,13 +239,16 @@ function walletTransactions(
       transaction.merchant ||
       transaction.counterparty ||
       transaction.description ||
-      "Transaction importée",
-    merchant: transaction.merchant || transaction.counterparty || "Portefeuille",
+      "Transaction",
+    merchant: transaction.merchant || transaction.counterparty || "",
     occurredAt: transaction.occurredAt.toISOString(),
     amountFen: Math.max(0, transaction.amountFen - (transaction.refundAmountFen ?? 0)),
-    category: normalizeCategory(transaction.category),
+    category: normalizeTransactionCategory(
+      transaction.category,
+      [transaction.merchant, transaction.counterparty, transaction.description].filter(Boolean).join(" "),
+    ),
     source: normalizeSource(transaction.provider),
-    paidBy: "Moi",
+    paidBy: viewerName,
     groupId: readString(transaction, "sharedGroupId"),
     shared: Boolean(readString(transaction, "sharedGroupId")),
   }));
@@ -234,48 +281,65 @@ function topGroupExpense(expenses: NonNullable<RawDashboard["group"]>["expenses"
   return top ? { name: top[0], ...top[1] } : null;
 }
 
-function topWalletMerchant(
-  merchants: RawDashboard["wallet"]["topMerchants"],
-) {
+function topWalletMerchant(merchants: RawDashboard["wallet"]["topMerchants"]) {
   const top = merchants[0];
-  if (!top) return null;
-  return { name: top.label, amountFen: top.amountFen, visits: top.visits };
+  return top ? { name: top.label, amountFen: top.amountFen, visits: top.visits } : null;
 }
 
-function topWeekday(values: Record<string, number>) {
-  const top = Object.entries(values).sort((left, right) => right[1] - left[1])[0];
-  if (!top) return null;
-  const labels: Record<string, string> = {
-    Mon: "Lundi",
-    Tue: "Mardi",
-    Wed: "Mercredi",
-    Thu: "Jeudi",
-    Fri: "Vendredi",
-    Sat: "Samedi",
-    Sun: "Dimanche",
-  };
-  return { label: labels[top[0]] ?? top[0], amountFen: top[1] };
+function normalizeBiggestDay(value: { label: string; amountFen: number } | null) {
+  return value ? { date: value.label, amountFen: value.amountFen } : null;
 }
 
-function selectBudget(raw: RawDashboard, scope: DashboardScope) {
+function selectBudget(raw: RawDashboard, scope: DashboardScope, month: string) {
   const budgets = scope === "personal" ? raw.budgets : raw.group?.budgets ?? [];
   const desiredGroupId = scope === "group" ? raw.group?.id : null;
-  return budgets.find((budget) => {
+  const selectedPeriod = monthPeriod(month);
+  const eligible = budgets.filter((budget) => {
     const budgetGroupId = readString(budget, "groupId");
-    return desiredGroupId ? budgetGroupId === desiredGroupId : !budgetGroupId;
-  }) ?? budgets[0];
+    const isActive = readBoolean(budget, "isActive");
+    return (
+      (desiredGroupId ? budgetGroupId === desiredGroupId : !budgetGroupId) &&
+      !readString(budget, "category") &&
+      isActive !== false
+    );
+  });
+  const exactMonthly = eligible.find(
+    (budget) =>
+      readString(budget, "periodType") === "month" &&
+      budget.startsAt.getTime() === selectedPeriod.from.getTime() &&
+      budget.endsAt.getTime() === selectedPeriod.to.getTime(),
+  );
+  if (exactMonthly) return exactMonthly;
+
+  const legacyAnnual = eligible
+    .filter(
+      (budget) =>
+        readString(budget, "periodType") === "year" &&
+        budget.startsAt <= selectedPeriod.from &&
+        budget.endsAt >= selectedPeriod.to,
+    )
+    .sort(
+      (left, right) =>
+        left.endsAt.getTime() - left.startsAt.getTime() -
+          (right.endsAt.getTime() - right.startsAt.getTime()) ||
+        right.startsAt.getTime() - left.startsAt.getTime() ||
+        left.id.localeCompare(right.id),
+    )[0];
+  if (!legacyAnnual) return null;
+
+  return {
+    ...legacyAnnual,
+    amountFen: Math.round(
+      legacyAnnual.amountFen /
+        calendarMonthSpan(legacyAnnual.startsAt, legacyAnnual.endsAt),
+    ),
+  };
 }
 
-function normalizeCategory(value: string): TransactionCategory {
-  const normalized = value.trim().toLowerCase();
-  if (["food", "restaurant", "restaurants", "groceries", "餐饮", "courses"].includes(normalized)) return "food";
-  if (["transport", "taxi", "metro", "train", "交通"].includes(normalized)) return "transport";
-  if (["housing", "rent", "home", "logement", "房租"].includes(normalized)) return "housing";
-  if (["shopping", "购物"].includes(normalized)) return "shopping";
-  if (["leisure", "coffee", "loisirs", "娱乐"].includes(normalized)) return "leisure";
-  if (["travel", "trip", "voyage", "旅行"].includes(normalized)) return "travel";
-  if (["health", "santé", "医疗"].includes(normalized)) return "health";
-  return "other";
+function calendarMonthSpan(startsAt: Date, endsAt: Date): number {
+  const [startYear, startMonth] = isoDate(startsAt).slice(0, 7).split("-").map(Number);
+  const [endYear, endMonth] = isoDate(endsAt).slice(0, 7).split("-").map(Number);
+  return Math.max(1, (endYear - startYear) * 12 + endMonth - startMonth + 1);
 }
 
 function normalizeSource(value: string): TransactionSource {
@@ -283,20 +347,8 @@ function normalizeSource(value: string): TransactionSource {
 }
 
 function timezoneCity(timezone: string) {
-  if (timezone === "Asia/Shanghai") return "中国";
-  return timezone.split("/").at(-1)?.replaceAll("_", " ") ?? "Chine";
-}
-
-function isoDate(date: Date, timezone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((candidate) => candidate.type === type)?.value ?? "";
-  return `${part("year")}-${part("month")}-${part("day")}`;
+  if (timezone === "Asia/Shanghai") return "China";
+  return timezone.split("/").at(-1)?.replaceAll("_", " ") ?? "China";
 }
 
 function readNumber(value: unknown, key: string): number | undefined {
@@ -309,6 +361,12 @@ function readString(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== "object") return undefined;
   const candidate = (value as Record<string, unknown>)[key];
   return typeof candidate === "string" ? candidate : undefined;
+}
+
+function readBoolean(value: unknown, key: string): boolean | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = (value as Record<string, unknown>)[key];
+  return typeof candidate === "boolean" ? candidate : undefined;
 }
 
 function readDate(value: unknown, key: string): Date | undefined {
@@ -325,4 +383,13 @@ function readRecord(value: unknown, key: string): Record<string, unknown> | unde
     : undefined;
 }
 
-export const __testables = { isoDate, resolveAcademicPeriod };
+export const __testables = {
+  buildCategories,
+  buildDailySpend,
+  buildMonthlyTrend,
+  calculatePreviousMonthDelta,
+  calendarMonthSpan,
+  isoDate,
+  selectBudget,
+  sumMonth,
+};

@@ -22,7 +22,6 @@ describe("wallet sharing D1 limits", () => {
     const select = vi
       .fn()
       .mockReturnValueOnce(queryWithLimit([shareableTransaction()]))
-      .mockReturnValueOnce(queryWithLimit([{ startsAt: null, endsAt: null }]))
       .mockReturnValueOnce(queryWithLimit([]))
       .mockReturnValueOnce(
         queryWithoutLimit(

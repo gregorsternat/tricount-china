@@ -1,12 +1,14 @@
 import {
   ChartNoAxesCombined,
-  LockKeyhole,
   UsersRound,
   WalletCards,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
+
+import { LanguageSwitcher } from "@/components/i18n";
+import { getMessages } from "@/lib/i18n/server";
 
 interface AuthShellProps {
   readonly eyebrow: string;
@@ -15,37 +17,27 @@ interface AuthShellProps {
   readonly children: ReactNode;
 }
 
-const highlights = [
-  {
-    icon: WalletCards,
-    title: "WeChat & Alipay réunis",
-    description: "Importe tes relevés sans partager ton historique privé.",
-  },
-  {
-    icon: ChartNoAxesCombined,
-    title: "Une année lisible",
-    description: "Repère les catégories, jours et habitudes qui comptent.",
-  },
-  {
-    icon: UsersRound,
-    title: "Les comptes restent simples",
-    description: "Partage uniquement les dépenses utiles à ton groupe.",
-  },
-] as const;
-
-export function AuthShell({
+export async function AuthShell({
   eyebrow,
   title,
   description,
   children,
 }: AuthShellProps) {
+  const messages = await getMessages();
+  const copy = messages.auth.shell;
+  const highlights = [
+    { icon: WalletCards, ...copy.highlights.wallets },
+    { icon: ChartNoAxesCombined, ...copy.highlights.overview },
+    { icon: UsersRound, ...copy.highlights.groups },
+  ] as const;
+
   return (
     <main className="min-h-[100dvh] bg-[#f3f1e9] text-[#173f35] lg:grid lg:grid-cols-[minmax(380px,0.88fr)_minmax(560px,1.12fr)]">
       <aside className="relative hidden min-h-[100dvh] overflow-hidden bg-[#173f35] px-10 py-9 text-[#f3f1e9] lg:flex lg:flex-col xl:px-14 xl:py-12">
         <Link
           href="/"
           className="inline-flex w-fit items-center gap-3 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-[#c9ff63] focus-visible:ring-offset-4 focus-visible:ring-offset-[#173f35]"
-          aria-label="Fēn, revenir à l’accueil"
+          aria-label={copy.backHome}
         >
           <Image
             src="/assets/fen-logo-mark-v2.png"
@@ -53,30 +45,25 @@ export function AuthShell({
             width={52}
             height={52}
             priority
-            className="size-13 rounded-[17px] object-cover"
+            className="rounded-[17px] object-cover"
           />
           <span>
             <span className="block text-xl font-semibold tracking-[-0.045em]">
               Fēn
             </span>
             <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b9c9c2]">
-              Mon année en Chine
+              {copy.tagline}
             </span>
           </span>
         </Link>
 
         <div className="my-auto max-w-[560px] py-16">
-          <p className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#c9ff63]/35 bg-[#c9ff63]/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-[#c9ff63]">
-            <LockKeyhole className="size-3.5" aria-hidden />
-            Cercle privé
-          </p>
           <h2 className="max-w-[520px] text-[clamp(2.9rem,5vw,5.2rem)] font-semibold leading-[0.94] tracking-[-0.065em]">
-            Ton année,
-            <span className="mt-2 block text-[#c9ff63]">en un coup d’œil.</span>
+            {copy.heroLine}
+            <span className="mt-2 block text-[#c9ff63]">{copy.heroAccent}</span>
           </h2>
           <p className="mt-7 max-w-[470px] text-base leading-7 text-[#c8d5cf] xl:text-lg">
-            Un espace commun pour les dépenses à plusieurs, un espace personnel
-            pour comprendre où part ton argent.
+            {copy.description}
           </p>
 
           <div className="mt-12 grid gap-3">
@@ -100,18 +87,15 @@ export function AuthShell({
             ))}
           </div>
         </div>
-
-        <p className="text-xs font-medium tracking-[0.02em] text-[#8fa69c]">
-          Pensé pour une petite bande d’amis, pas pour revendre vos données.
-        </p>
       </aside>
 
-      <section className="flex min-h-[100dvh] items-center justify-center px-5 py-6 sm:px-8 sm:py-10 lg:px-12 xl:px-20">
+      <section className="relative flex min-h-[100dvh] items-center justify-center px-5 py-6 sm:px-8 sm:py-10 lg:px-12 xl:px-20">
+        <LanguageSwitcher className="absolute right-4 top-4 sm:right-6 sm:top-6" />
         <div className="w-full max-w-[520px]">
           <Link
             href="/"
             className="mb-8 inline-flex items-center gap-3 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-[#77a52a] focus-visible:ring-offset-4 lg:hidden"
-            aria-label="Fēn, revenir à l’accueil"
+            aria-label={copy.backHome}
           >
             <Image
               src="/assets/fen-logo-mark-v2.png"
@@ -119,14 +103,14 @@ export function AuthShell({
               width={48}
               height={48}
               priority
-              className="size-12 rounded-[16px] object-cover"
+              className="rounded-[16px] object-cover"
             />
             <span>
               <span className="block text-lg font-semibold tracking-[-0.04em]">
                 Fēn
               </span>
               <span className="mt-0.5 block text-[9px] font-semibold uppercase tracking-[0.18em] text-[#53675d]">
-                Mon année en Chine
+                {copy.tagline}
               </span>
             </span>
           </Link>
@@ -145,10 +129,6 @@ export function AuthShell({
             <div className="mt-8">{children}</div>
           </div>
 
-          <p className="mx-auto mt-5 max-w-[430px] text-center text-xs leading-5 text-[#5d6f66]">
-            Tes imports restent privés. Rien n’est partagé avec un groupe sans ton
-            action explicite.
-          </p>
         </div>
       </section>
     </main>

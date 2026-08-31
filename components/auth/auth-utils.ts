@@ -1,3 +1,9 @@
+import { enMessages } from "@/lib/i18n/messages/en";
+import type {
+  AuthErrorMessageKey,
+  AuthErrorMessages,
+} from "@/lib/i18n/messages/types";
+
 export const AUTH_MIN_PASSWORD_LENGTH = 8;
 export const AUTH_MAX_PASSWORD_LENGTH = 128;
 
@@ -55,14 +61,22 @@ export function buildAuthHref(
 export function getAuthErrorMessage(
   error: unknown,
   flow: AuthFlow,
+  messages: AuthErrorMessages = enMessages.auth.errors,
 ): string {
+  return messages[getAuthErrorKey(error, flow)];
+}
+
+export function getAuthErrorKey(
+  error: unknown,
+  flow: AuthFlow,
+): AuthErrorMessageKey {
   const details = isAuthErrorShape(error) ? error : undefined;
   const code = String(details?.code ?? "").toUpperCase();
   const message = String(details?.message ?? "").toUpperCase();
   const status = Number(details?.status ?? 0);
 
   if (status === 429 || code.includes("RATE_LIMIT")) {
-    return "Trop de tentatives. Attends une minute avant de réessayer.";
+    return "rateLimit";
   }
 
   if (flow === "sign-in") {
@@ -77,10 +91,10 @@ export function getAuthErrorMessage(
       message.includes("INVALID PASSWORD") ||
       message.includes("USER NOT FOUND")
     ) {
-      return "Email ou mot de passe incorrect.";
+      return "invalidCredentials";
     }
 
-    return "Connexion impossible pour le moment. Vérifie ta connexion puis réessaie.";
+    return "signInUnavailable";
   }
 
   if (
@@ -88,7 +102,7 @@ export function getAuthErrorMessage(
     message.includes("INVITATION IS REQUIRED") ||
     status === 403
   ) {
-    return "Cette adresse n’est pas encore autorisée. Utilise ton lien d’invitation ou demande à être ajouté.";
+    return "invitationRequired";
   }
 
   if (
@@ -96,14 +110,14 @@ export function getAuthErrorMessage(
     code.includes("EMAIL_ALREADY") ||
     message.includes("ALREADY EXISTS")
   ) {
-    return "Un compte existe déjà avec cette adresse. Connecte-toi plutôt.";
+    return "accountExists";
   }
 
   if (code.includes("PASSWORD") || message.includes("PASSWORD")) {
-    return `Choisis un mot de passe entre ${AUTH_MIN_PASSWORD_LENGTH} et ${AUTH_MAX_PASSWORD_LENGTH} caractères.`;
+    return "passwordLength";
   }
 
-  return "Création du compte impossible pour le moment. Vérifie les informations puis réessaie.";
+  return "signUpUnavailable";
 }
 
 function isAuthErrorShape(value: unknown): value is AuthErrorShape {

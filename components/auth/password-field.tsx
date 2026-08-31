@@ -3,6 +3,7 @@
 import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 
+import { useI18n } from "@/components/i18n";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,7 @@ export function PasswordField({
   maxLength,
   disabled,
 }: PasswordFieldProps) {
+  const { messages } = useI18n();
   const [visible, setVisible] = useState(false);
   const descriptionId = description ? `${id}-description` : undefined;
   const errorId = error ? `${id}-error` : undefined;
@@ -62,7 +64,9 @@ export function PasswordField({
           onClick={() => setVisible((current) => !current)}
           disabled={disabled}
           className="absolute right-1.5 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-[11px] text-[#63776e] outline-none transition-colors hover:bg-[#edf0e8] hover:text-[#173f35] focus-visible:ring-2 focus-visible:ring-[#77a52a] disabled:pointer-events-none disabled:opacity-50"
-          aria-label={visible ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+          aria-label={
+            visible ? messages.auth.password.hide : messages.auth.password.show
+          }
           aria-pressed={visible}
         >
           {visible ? (

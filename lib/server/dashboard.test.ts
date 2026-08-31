@@ -6,18 +6,18 @@ vi.mock("@/lib/db/client", () => ({ getDb: vi.fn() }));
 import { __testables } from "./dashboard";
 
 describe("dashboard periods and ledger balances", () => {
-  it("uses a stable Shanghai student year for personal scope", () => {
-    const august = __testables.defaultStudentYearPeriod(
+  it("uses a stable Shanghai calendar month for personal scope", () => {
+    const august = __testables.defaultCalendarMonthPeriod(
       new Date("2026-08-31T12:00:00+08:00"),
     );
-    const september = __testables.defaultStudentYearPeriod(
+    const september = __testables.defaultCalendarMonthPeriod(
       new Date("2026-09-01T12:00:00+08:00"),
     );
 
-    expect(august.from.toISOString()).toBe("2025-08-31T16:00:00.000Z");
+    expect(august.from.toISOString()).toBe("2026-07-31T16:00:00.000Z");
     expect(august.to.toISOString()).toBe("2026-08-31T15:59:59.999Z");
     expect(september.from.toISOString()).toBe("2026-08-31T16:00:00.000Z");
-    expect(september.to.toISOString()).toBe("2027-08-31T15:59:59.999Z");
+    expect(september.to.toISOString()).toBe("2026-09-30T15:59:59.999Z");
   });
 
   it("keeps all-time active ledger rows in balances while period analytics stay filtered", () => {
@@ -81,7 +81,7 @@ describe("dashboard periods and ledger balances", () => {
       amountFen: 1_000,
       refundAmountFen: null,
       category: "food",
-      merchant: "Campus canteen",
+      merchant: "Campus restaurant",
       counterparty: null,
       description: null,
       isExcluded: false,
@@ -92,9 +92,75 @@ describe("dashboard periods and ledger balances", () => {
 
     expect(wallet.recentTransactions).toHaveLength(20);
     expect(wallet.topMerchants[0]).toEqual({
-      label: "Campus canteen",
+      label: "Campus restaurant",
       amountFen: 25_000,
       visits: 25,
     });
+    expect(wallet.byCategory.restaurant).toBe(25_000);
+    expect(wallet.categoryCounts.restaurant).toBe(25);
+  });
+
+  it("uses normalized categories when calculating category budget progress", () => {
+    const startsAt = new Date("2026-08-01T00:00:00+08:00");
+    const endsAt = new Date("2026-08-31T23:59:59.999+08:00");
+    const timestamps = {
+      createdAt: startsAt,
+      updatedAt: startsAt,
+    };
+    const budgetDefaults = {
+      ownerUserId: "owner-1",
+      name: "Category budget",
+      periodType: "month" as const,
+      amountFen: 10_000,
+      currency: "CNY",
+      startsAt,
+      endsAt,
+      rollover: false,
+      alertThresholdBasisPoints: 8_000,
+      isActive: true,
+      ...timestamps,
+    };
+
+    const [groupBudget] = __testables.buildBudgetProgress(
+      [{
+        ...budgetDefaults,
+        id: "restaurant-budget",
+        groupId: "group-1",
+        category: "restaurant",
+      }],
+      [{
+        occurredAt: new Date("2026-08-12T12:00:00+08:00"),
+        category: "food",
+        title: "Campus restaurant",
+        notes: null,
+        amountFen: 2_500,
+        amountBaseFen: null,
+      }],
+      [],
+    );
+    expect(groupBudget.spentFen).toBe(2_500);
+
+    const [personalBudget] = __testables.buildBudgetProgress(
+      [{
+        ...budgetDefaults,
+        id: "groceries-budget",
+        groupId: null,
+        category: "groceries",
+      }],
+      [],
+      [{
+        occurredAt: new Date("2026-08-13T12:00:00+08:00"),
+        category: "food",
+        merchant: "盒马鲜生",
+        counterparty: null,
+        description: null,
+        direction: "outflow",
+        status: "completed",
+        isExcluded: false,
+        amountFen: 3_000,
+        refundAmountFen: null,
+      }],
+    );
+    expect(personalBudget.spentFen).toBe(3_000);
   });
 });

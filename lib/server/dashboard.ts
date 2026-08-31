@@ -9,9 +9,12 @@ import {
   inArray,
   isNull,
   lte,
+  or,
   sql,
 } from "drizzle-orm";
 
+import { normalizeTransactionCategory } from "@/lib/dashboard/category";
+import { currentMonthKey, monthPeriod } from "@/lib/dashboard/period";
 import { getDb, type AppDatabase } from "@/lib/db/client";
 import {
   budgets,
@@ -139,14 +142,14 @@ export async function getDashboardSnapshot(
     throw forbidden();
   }
 
-  const personalPeriod = defaultStudentYearPeriod();
+  const personalPeriod = defaultCalendarMonthPeriod();
   const from =
     requestedPeriod.from ??
-    (requestedScope === "group" ? selectedGroup?.startsAt : personalPeriod.from) ??
+    personalPeriod.from ??
     undefined;
   const to =
     requestedPeriod.to ??
-    (requestedScope === "group" ? selectedGroup?.endsAt : personalPeriod.to) ??
+    personalPeriod.to ??
     undefined;
   if (from && to && to < from) {
     throw new Error("Dashboard period end must be after its start.");
@@ -162,12 +165,23 @@ export async function getDashboardSnapshot(
         and(
           eq(budgets.ownerUserId, userId),
           isNull(budgets.groupId),
+          isNull(budgets.category),
           eq(budgets.isActive, true),
-          from ? gte(budgets.endsAt, from) : undefined,
-          to ? lte(budgets.startsAt, to) : undefined,
+          or(
+            and(
+              eq(budgets.periodType, "month"),
+              eq(budgets.startsAt, from),
+              eq(budgets.endsAt, to),
+            ),
+            and(
+              eq(budgets.periodType, "year"),
+              lte(budgets.startsAt, from),
+              gte(budgets.endsAt, to),
+            ),
+          ),
         ),
       )
-      .orderBy(budgets.startsAt),
+      .orderBy(desc(budgets.updatedAt), budgets.id),
   ]);
   const wallet = buildWalletSnapshot(
     walletRows,
@@ -261,12 +275,22 @@ export async function getDashboardSnapshot(
         and(
           eq(budgets.isActive, true),
           eq(budgets.groupId, selectedGroup.id),
-          from ? gte(budgets.endsAt, from) : undefined,
-          to ? lte(budgets.startsAt, to) : undefined,
+          isNull(budgets.category),
+          or(
+            and(
+              eq(budgets.periodType, "month"),
+              eq(budgets.startsAt, from),
+              eq(budgets.endsAt, to),
+            ),
+            and(
+              eq(budgets.periodType, "year"),
+              lte(budgets.startsAt, from),
+              gte(budgets.endsAt, to),
+            ),
+          ),
         ),
       )
-      .orderBy(desc(budgets.updatedAt), budgets.id)
-      .limit(1),
+      .orderBy(desc(budgets.updatedAt), budgets.id),
   ]);
 
   const shareRows = allExpenseRows.length
@@ -432,9 +456,10 @@ function buildWalletSnapshot<
   const spendRows = rows.filter(isSpendTransaction);
   const byCategory = sumBy(
     spendRows,
-    (row) => row.category || "uncategorized",
+    (row) => walletCategory(row),
     effectiveWalletSpend,
   );
+  const categoryCounts = countBy(spendRows, (row) => walletCategory(row));
   const byDate = sumBy(
     spendRows,
     (row) => dateKey(row.occurredAt, timezone),
@@ -506,6 +531,7 @@ function buildWalletSnapshot<
       ? Math.round(totalSpentFen / spendRows.length)
       : 0,
     byCategory,
+    categoryCounts,
     byDate,
     byWeekday,
     byProvider,
@@ -533,12 +559,17 @@ function buildBudgetProgress(
   expenseRows: Array<{
     occurredAt: Date;
     category: string;
+    title?: string | null;
+    notes?: string | null;
     amountFen: number;
     amountBaseFen: number | null;
   }>,
   walletRows: Array<{
     occurredAt: Date;
     category: string;
+    merchant: string | null;
+    counterparty: string | null;
+    description: string | null;
     direction: string;
     status: string;
     isExcluded: boolean;
@@ -547,13 +578,17 @@ function buildBudgetProgress(
   }>,
 ) {
   return budgetRows.map((budget) => {
+    const normalizedBudgetCategory = budget.category
+      ? normalizeTransactionCategory(budget.category)
+      : null;
     const relevantAmount = budget.groupId
       ? expenseRows
           .filter(
             (expense) =>
               expense.occurredAt >= budget.startsAt &&
               expense.occurredAt <= budget.endsAt &&
-              (!budget.category || expense.category === budget.category),
+              (!normalizedBudgetCategory ||
+                groupExpenseCategory(expense) === normalizedBudgetCategory),
           )
           .reduce(
             (sum, expense) => sum + (expense.amountBaseFen ?? expense.amountFen),
@@ -565,7 +600,8 @@ function buildBudgetProgress(
               isSpendTransaction(transaction) &&
               transaction.occurredAt >= budget.startsAt &&
               transaction.occurredAt <= budget.endsAt &&
-              (!budget.category || transaction.category === budget.category),
+              (!normalizedBudgetCategory ||
+                walletCategory(transaction) === normalizedBudgetCategory),
           )
           .reduce(
             (sum, transaction) => sum + effectiveWalletSpend(transaction),
@@ -600,6 +636,8 @@ function buildGroupAnalytics<
     paidByMemberId: string;
     occurredAt: Date;
     category: string;
+    title?: string | null;
+    notes?: string | null;
     shares: Array<{ memberId: string; amountFen: number }>;
   },
   S extends {
@@ -641,9 +679,10 @@ function buildGroupAnalytics<
 
   const byCategory = sumBy(
     expenseRows,
-    (expense) => expense.category,
+    (expense) => groupExpenseCategory(expense),
     (expense) => expense.amountBaseFen ?? expense.amountFen,
   );
+  const categoryCounts = countBy(expenseRows, (expense) => groupExpenseCategory(expense));
   const byDate = sumBy(
     expenseRows,
     (expense) => dateKey(expense.occurredAt, timezone),
@@ -665,6 +704,7 @@ function buildGroupAnalytics<
       balanceFen: balances.get(member.id) ?? 0,
     })),
     byCategory,
+    categoryCounts,
     byDate,
     byWeekday: sumBy(
       expenseRows,
@@ -684,24 +724,35 @@ function isWithinPeriod(
   return (!from || occurredAt >= from) && (!to || occurredAt <= to);
 }
 
-function defaultStudentYearPeriod(now = new Date()): {
+function defaultCalendarMonthPeriod(now = new Date()): {
   from: Date;
   to: Date;
 } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "numeric",
-  }).formatToParts(now);
-  const part = (type: "year" | "month") =>
-    Number(parts.find((candidate) => candidate.type === type)?.value);
-  const year = part("year");
-  const month = part("month");
-  const startYear = month >= 9 ? year : year - 1;
-  return {
-    from: new Date(`${startYear}-09-01T00:00:00+08:00`),
-    to: new Date(`${startYear + 1}-08-31T23:59:59.999+08:00`),
-  };
+  const period = monthPeriod(currentMonthKey(now));
+  return { from: period.from, to: period.to };
+}
+
+function walletCategory(row: {
+  category: string;
+  merchant: string | null;
+  counterparty: string | null;
+  description: string | null;
+}) {
+  return normalizeTransactionCategory(
+    row.category,
+    [row.merchant, row.counterparty, row.description].filter(Boolean).join(" "),
+  );
+}
+
+function groupExpenseCategory(expense: {
+  category: string;
+  title?: string | null;
+  notes?: string | null;
+}) {
+  return normalizeTransactionCategory(
+    expense.category,
+    [expense.title, expense.notes].filter(Boolean).join(" "),
+  );
 }
 
 function isSpendTransaction<T extends {
@@ -772,10 +823,13 @@ function weekdayKey(date: Date, timezone: string): string {
 }
 
 export const __testables = {
+  buildBudgetProgress,
   buildWalletSnapshot,
   buildGroupAnalytics,
-  defaultStudentYearPeriod,
+  defaultCalendarMonthPeriod,
   effectiveWalletSpend,
+  groupExpenseCategory,
   isSpendTransaction,
   isWithinPeriod,
+  walletCategory,
 };

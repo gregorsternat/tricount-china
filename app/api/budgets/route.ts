@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isMonthKey, monthPeriod } from "@/lib/dashboard/period";
 import { upsertBudget } from "@/lib/server/dal";
 import { requireAuthenticatedUser } from "@/lib/server/auth-session";
 import { idempotentJson } from "@/lib/server/idempotent-json";
@@ -8,8 +9,7 @@ import { getUiDashboardSnapshot } from "@/lib/server/ui-dashboard";
 
 const bodySchema = z.object({
   budgetFen: z.number().int().positive().safe(),
-  startsOn: z.iso.date(),
-  endsOn: z.iso.date(),
+  month: z.string().refine(isMonthKey, "Invalid month."),
   scope: z.enum(["personal", "group"]),
   groupId: z.string().min(1).max(160).nullish(),
 });
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const groupId = body.scope === "group" ? body.groupId : null;
     if (body.scope === "group" && !groupId) {
       return Response.json(
-        { error: { code: "GROUP_REQUIRED", message: "Sélectionne un tricount." } },
+        { error: { code: "GROUP_REQUIRED", message: "Select a group." } },
         { status: 400 },
       );
     }
@@ -35,21 +35,27 @@ export async function POST(request: Request) {
         requestBody: body,
       },
       async () => {
+        const period = monthPeriod(body.month);
         const budget = await upsertBudget(viewer.id, {
           groupId,
-          name: body.scope === "group" ? "Budget du tricount" : "Budget annuel personnel",
-          periodType: "year",
+          name: "Monthly budget",
+          periodType: "month",
           amountFen: body.budgetFen,
           currency: "CNY",
-          startsAt: new Date(`${body.startsOn}T00:00:00+08:00`),
-          endsAt: new Date(`${body.endsOn}T23:59:59.999+08:00`),
+          startsAt: period.from,
+          endsAt: period.to,
           alertThresholdBasisPoints: 8_000,
           isActive: true,
         });
 
-        const snapshot = await getUiDashboardSnapshot(viewer, body.scope, groupId ?? undefined);
+        const snapshot = await getUiDashboardSnapshot(
+          viewer,
+          body.scope,
+          groupId ?? undefined,
+          body.month,
+        );
         return {
-          body: { snapshot, message: "Budget annuel mis à jour." },
+          body: { snapshot, messageCode: "budget.updated" },
           resourceType: "budget",
           resourceId: budget.id,
         };

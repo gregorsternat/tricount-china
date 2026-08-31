@@ -112,6 +112,7 @@ export function createMigratedSqliteDatabase(): DatabaseSync {
     "migrations/0001_dapper_mikhail_rasputin.sql",
     "migrations/0002_canonical-group-budget.sql",
     "migrations/0003_pending-invitation-uniqueness.sql",
+    "migrations/0004_monthly-budget-history.sql",
   ]) {
     const contents = readFileSync(migration, "utf8");
     for (const statement of contents.split("--> statement-breakpoint")) {

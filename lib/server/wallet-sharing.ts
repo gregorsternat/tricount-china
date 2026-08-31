@@ -8,7 +8,6 @@ import {
   expenses,
   expenseShares,
   groupMembers,
-  groups,
   walletExpenseLinks,
   walletTransactions,
 } from "@/lib/db/schema";
@@ -36,19 +35,6 @@ export async function shareWalletTransactionWithGroup(
     )
     .limit(1);
   if (!transaction) throw notFound("Wallet transaction not found.");
-
-  const [groupPeriod] = await database
-    .select({ startsAt: groups.startsAt, endsAt: groups.endsAt })
-    .from(groups)
-    .where(eq(groups.id, groupId))
-    .limit(1);
-  if (!groupPeriod) throw notFound("Group not found.");
-  if (
-    (groupPeriod.startsAt && transaction.occurredAt < groupPeriod.startsAt) ||
-    (groupPeriod.endsAt && transaction.occurredAt > groupPeriod.endsAt)
-  ) {
-    throw conflict("The payment date falls outside the group period.");
-  }
 
   const existingLink = await findWalletExpenseLink(
     ownerUserId,
@@ -117,7 +103,7 @@ export async function shareWalletTransactionWithGroup(
     transaction.merchant ||
     transaction.counterparty ||
     transaction.rawDescription ||
-    "Paiement importé";
+    "Imported payment";
 
   try {
     await database.batch([
@@ -130,7 +116,7 @@ export async function shareWalletTransactionWithGroup(
             ${ownerUserId},
             ${membership.id},
             ${title},
-            ${`Partagé depuis ${transaction.provider === "wechat" ? "WeChat Pay" : transaction.provider === "alipay" ? "Alipay" : "le portefeuille personnel"}`},
+            ${`Shared from ${transaction.provider === "wechat" ? "WeChat Pay" : transaction.provider === "alipay" ? "Alipay" : "personal wallet"}`},
             ${transaction.category || "other"},
             ${effectiveAmountFen},
             ${transaction.currency},

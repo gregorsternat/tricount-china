@@ -211,7 +211,7 @@ describe("DrizzleImportRepository", () => {
       source_id: "alipay-order-1",
       external_transaction_id: "202609020001",
       merchant_order_id: "merchant-order-1",
-      category: "food",
+      category: "groceries",
       category_raw: "日用百货",
       amount_fen: 4_280,
       direction: "outflow",

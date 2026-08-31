@@ -7,6 +7,7 @@ import { FormEvent, useMemo, useState } from "react";
 
 import { FormStatus } from "@/components/auth/form-status";
 import { PasswordField } from "@/components/auth/password-field";
+import { useI18n } from "@/components/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,9 +15,10 @@ import { signIn } from "@/lib/auth-client";
 
 import {
   buildAuthHref,
-  getAuthErrorMessage,
+  getAuthErrorKey,
   safeRedirectPath,
 } from "./auth-utils";
+import type { AuthErrorMessageKey } from "@/lib/i18n/messages/types";
 import { claimInvitationWithRetry } from "./invitation-claim";
 
 interface SignInFormProps {
@@ -28,15 +30,17 @@ interface SignInFormProps {
 type SubmitState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "claim-error"; message: string }
-  | { kind: "error"; message: string }
-  | { kind: "success"; message: string };
+  | { kind: "claim-error" }
+  | { kind: "error"; messageKey: AuthErrorMessageKey }
+  | { kind: "success" };
 
 export function SignInForm({
   invitationToken,
   initialEmail = "",
   nextPath = "/",
 }: SignInFormProps) {
+  const { messages } = useI18n();
+  const copy = messages.auth.login;
   const router = useRouter();
   const destination = safeRedirectPath(nextPath);
   const [email, setEmail] = useState(initialEmail);
@@ -57,7 +61,7 @@ export function SignInForm({
   async function finishInvitationClaim() {
     if (invitationToken) await claimInvitationWithRetry(invitationToken);
 
-    setState({ kind: "success", message: "Connexion réussie. Ouverture de ton espace…" });
+    setState({ kind: "success" });
     router.replace(destination);
     router.refresh();
   }
@@ -70,11 +74,7 @@ export function SignInForm({
       try {
         await finishInvitationClaim();
       } catch {
-        setState({
-          kind: "claim-error",
-          message:
-            "Tu es connecté, mais l’invitation n’a pas pu être activée. Vérifie ta connexion puis réessaie.",
-        });
+        setState({ kind: "claim-error" });
       }
       return;
     }
@@ -92,7 +92,7 @@ export function SignInForm({
       if (result.error) {
         setState({
           kind: "error",
-          message: getAuthErrorMessage(result.error, "sign-in"),
+          messageKey: getAuthErrorKey(result.error, "sign-in"),
         });
         return;
       }
@@ -101,16 +101,12 @@ export function SignInForm({
       try {
         await finishInvitationClaim();
       } catch {
-        setState({
-          kind: "claim-error",
-          message:
-            "Tu es connecté, mais l’invitation n’a pas pu être activée. Vérifie ta connexion puis réessaie.",
-        });
+        setState({ kind: "claim-error" });
       }
     } catch (error) {
       setState({
         kind: "error",
-        message: getAuthErrorMessage(error, "sign-in"),
+        messageKey: getAuthErrorKey(error, "sign-in"),
       });
     }
   }
@@ -119,7 +115,7 @@ export function SignInForm({
     <form onSubmit={handleSubmit} className="space-y-5" aria-busy={pending}>
       <div className="space-y-2">
         <Label htmlFor="sign-in-email" className="text-[13px] font-semibold text-[#284b42]">
-          Email
+          {copy.emailLabel}
         </Label>
         <Input
           id="sign-in-email"
@@ -133,7 +129,7 @@ export function SignInForm({
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           disabled={fieldsDisabled}
-          placeholder="toi@exemple.com"
+          placeholder={copy.emailPlaceholder}
           className="h-12 rounded-[14px] border-[#173f35]/15 bg-white px-4 text-[15px] shadow-none placeholder:text-[#6b7a72] focus-visible:border-[#466c60] focus-visible:ring-[#c9ff63]/65"
         />
       </div>
@@ -141,7 +137,7 @@ export function SignInForm({
       <PasswordField
         id="sign-in-password"
         name="password"
-        label="Mot de passe"
+        label={copy.passwordLabel}
         autoComplete="current-password"
         disabled={fieldsDisabled}
       />
@@ -154,13 +150,19 @@ export function SignInForm({
           disabled={fieldsDisabled}
           className="size-4 rounded border-[#173f35]/25 accent-[#173f35] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#77a52a]"
         />
-        Rester connecté sur cet appareil
+        {copy.rememberMe}
       </label>
 
       {state.kind === "error" || state.kind === "claim-error" || state.kind === "success" ? (
         <FormStatus
           kind={state.kind === "claim-error" ? "error" : state.kind}
-          message={state.message}
+          message={
+            state.kind === "error"
+              ? messages.auth.errors[state.messageKey]
+              : state.kind === "claim-error"
+                ? copy.claimError
+                : copy.success
+          }
         />
       ) : null}
 
@@ -173,26 +175,26 @@ export function SignInForm({
           <>
             <LoaderCircle className="size-4 animate-spin" aria-hidden />
             {state.kind === "success"
-              ? "Ouverture…"
+              ? copy.opening
               : authenticated
-                ? "Activation…"
-                : "Connexion…"}
+                ? copy.activating
+                : copy.signingIn}
           </>
         ) : (
           <>
-            {authenticated ? "Réessayer l’activation" : "Se connecter"}
+            {authenticated ? copy.retryActivation : copy.submit}
             <ArrowRight className="size-4" aria-hidden />
           </>
         )}
       </Button>
 
       <p className="border-t border-[#173f35]/10 pt-5 text-center text-sm leading-6 text-[#66786f]">
-        Première fois sur Fēn ?{" "}
+        {copy.firstTime}{" "}
         <Link
           href={joinHref}
           className="font-semibold text-[#173f35] underline decoration-[#95bd47] decoration-2 underline-offset-4 outline-none hover:text-[#386655] focus-visible:rounded focus-visible:ring-2 focus-visible:ring-[#77a52a]"
         >
-          Créer mon compte
+          {copy.createAccount}
         </Link>
       </p>
     </form>

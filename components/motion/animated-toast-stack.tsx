@@ -269,13 +269,18 @@ export function AnimatedToastStack({
   icons,
   renderToast,
 }: AnimatedToastStackProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setMounted(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
   const visibleToasts = toasts.slice(-maxVisible);
   const isBottom = position.startsWith("bottom");
   const resolvedPlacement = placement ?? (fixed ? "fixed" : "static");
   const shouldPortal = portal ?? resolvedPlacement === "fixed";
 
   const portalTarget =
-    shouldPortal && typeof document !== "undefined"
+    mounted && shouldPortal && typeof document !== "undefined"
       ? (portalRoot ?? document.body)
       : null;
 

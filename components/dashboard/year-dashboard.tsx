@@ -4,78 +4,63 @@ import { SiAlipay, SiWechat } from "@icons-pack/react-simple-icons";
 import {
   ArrowDownRight,
   ArrowUpRight,
-  Bell,
-  BookOpen,
   CalendarDays,
   Check,
-  ChevronDown,
+  ChevronLeft,
   ChevronRight,
-  CircleHelp,
+  CircleDollarSign,
   CloudOff,
   Coffee,
-  Ellipsis,
-  FileUp,
   HeartPulse,
-  Home,
   House,
-  Landmark,
+  Languages,
   LogOut,
   Menu,
-  MoreHorizontal,
   PencilLine,
   Plane,
   Plus,
   RefreshCw,
   Search,
-  Settings,
+  Share2,
   ShoppingBag,
+  ShoppingBasket,
   Sparkles,
+  Store,
   TrainFront,
   UserPlus,
   Users,
   Utensils,
   WalletCards,
-  X,
 } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Bar,
-  CartesianGrid,
-  Cell,
-  ComposedChart,
-  Line,
-  Pie,
-  PieChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  AddExpenseDialog,
-  AddMemberDialog,
-  BudgetDialog,
-  CreateGroupDialog,
-  ImportWalletDialog,
-  ShareTransactionDialog,
-  SettlementDialog,
-  type AddExpensePayload,
-  type CreateGroupPayload,
+import type {
+  AddExpensePayload,
+  CreateGroupPayload,
 } from "@/components/dashboard/dashboard-dialogs";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { LanguageSwitcher, useI18n } from "@/components/i18n";
+import { AnimatedToastStack, useAnimatedToastStack } from "@/components/motion/animated-toast-stack";
+import { BottomSheet } from "@/components/motion/bottom-sheet";
+import { Button as MotionButton } from "@/components/motion/button/base";
+import { Input as MotionInput } from "@/components/motion/input";
+import { NumberTicker } from "@/components/motion/number-ticker";
+import { PullToRefresh } from "@/components/motion/pull-to-refresh";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/motion/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/motion/tabs";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { authClient } from "@/lib/auth-client";
 import { createDemoDashboard } from "@/lib/dashboard/demo";
+import { currentMonthKey, shiftMonth } from "@/lib/dashboard/period";
 import { RefreshEpoch } from "@/lib/dashboard/refresh-epoch";
 import type {
   DashboardGroup,
@@ -86,19 +71,66 @@ import type {
   TransactionCategory,
   TransactionSource,
 } from "@/lib/dashboard/types";
-import { initials } from "@/lib/format";
+import {
+  formatCny,
+  formatDateTime,
+  formatMonthKey,
+  formatPercent,
+  formatShortDate,
+  initials,
+} from "@/lib/format";
+import { getIntlLocale } from "@/lib/i18n/config";
 import { cn } from "@/lib/utils";
-import { authClient } from "@/lib/auth-client";
+
+const DailySpendingChart = dynamic(() =>
+  import("@/components/dashboard/dashboard-charts").then((module) => module.DailySpendingChart),
+);
+const SixMonthTrendChart = dynamic(() =>
+  import("@/components/dashboard/dashboard-charts").then((module) => module.SixMonthTrendChart),
+);
+const AddExpenseDialog = dynamic(() =>
+  import("@/components/dashboard/dashboard-dialogs").then((module) => module.AddExpenseDialog),
+);
+const AddMemberDialog = dynamic(() =>
+  import("@/components/dashboard/dashboard-dialogs").then((module) => module.AddMemberDialog),
+);
+const BudgetDialog = dynamic(() =>
+  import("@/components/dashboard/dashboard-dialogs").then((module) => module.BudgetDialog),
+);
+const CreateGroupDialog = dynamic(() =>
+  import("@/components/dashboard/dashboard-dialogs").then((module) => module.CreateGroupDialog),
+);
+const ImportWalletDialog = dynamic(() =>
+  import("@/components/dashboard/dashboard-dialogs").then((module) => module.ImportWalletDialog),
+);
+const ShareTransactionDialog = dynamic(() =>
+  import("@/components/dashboard/dashboard-dialogs").then((module) => module.ShareTransactionDialog),
+);
+const SettlementDialog = dynamic(() =>
+  import("@/components/dashboard/dashboard-dialogs").then((module) => module.SettlementDialog),
+);
 
 interface YearDashboardProps {
   readonly initialData: DashboardSnapshot;
   readonly demoMode?: boolean;
 }
 
-type DialogName = "expense" | "group" | "import" | "member" | "budget" | "settlement" | "share" | null;
+type DialogName =
+  | "expense"
+  | "group"
+  | "import"
+  | "member"
+  | "budget"
+  | "settlement"
+  | "share"
+  | null;
+
+type MobileSheet = "menu" | "actions" | null;
 
 const categoryIcons: Record<TransactionCategory, typeof Utensils> = {
-  food: Utensils,
+  restaurant: Utensils,
+  groceries: ShoppingBasket,
+  food: Store,
   transport: TrainFront,
   housing: House,
   shopping: ShoppingBag,
@@ -108,104 +140,85 @@ const categoryIcons: Record<TransactionCategory, typeof Utensils> = {
   other: Sparkles,
 };
 
-const categoryLabels: Record<TransactionCategory, string> = {
-  food: "Restaurants & courses",
-  transport: "Transports",
-  housing: "Logement",
-  shopping: "Shopping",
-  leisure: "Loisirs",
-  travel: "Voyages",
-  health: "Santé",
-  other: "Autres",
+const categoryColors: Record<TransactionCategory, string> = {
+  restaurant: "#173f35",
+  groceries: "#7fae4f",
+  food: "#b89c63",
+  transport: "#65aaa3",
+  housing: "#d99460",
+  shopping: "#9d8cbc",
+  leisure: "#d0a34e",
+  travel: "#5d88b4",
+  health: "#c77d78",
+  other: "#b8b5aa",
 };
 
-function formatAmount(fen: number, compact = false) {
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "CNY",
-    minimumFractionDigits: compact ? 0 : 2,
-    maximumFractionDigits: compact ? 0 : 2,
-  }).format(fen / 100);
-}
-
-function formatDate(date: string) {
-  return new Intl.DateTimeFormat("fr-FR", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Asia/Shanghai",
-  }).format(new Date(date));
-}
-
-function formatDayMonth(date: string) {
-  return new Intl.DateTimeFormat("fr-FR", {
-    day: "numeric",
-    month: "long",
-    timeZone: "Asia/Shanghai",
-  }).format(new Date(`${date}T12:00:00+08:00`));
-}
-
-function sourceIcon(source: TransactionSource, className = "size-4") {
-  if (source === "wechat") return <SiWechat className={className} aria-hidden />;
-  if (source === "alipay") return <SiAlipay className={className} aria-hidden />;
-  return <PencilLine className={className} aria-hidden />;
-}
-
-async function readJson<T>(response: Response): Promise<T> {
+async function readJson<T>(response: Response, fallback: string): Promise<T> {
   const payload = (await response.json().catch(() => null)) as
     | (T & { error?: string | { message?: string } })
     | null;
   if (!response.ok) {
     const serverError = payload?.error;
     const message = typeof serverError === "string" ? serverError : serverError?.message;
-    throw new Error(message ?? "Le serveur n’a pas pu terminer cette action.");
+    throw new Error(message ?? fallback);
   }
-  if (!payload) throw new Error("Réponse serveur invalide.");
+  if (!payload) throw new Error(fallback);
   return payload;
 }
 
 export function YearDashboard({ initialData, demoMode = false }: YearDashboardProps) {
   const router = useRouter();
+  const reduceMotion = useReducedMotion();
+  const { locale, messages } = useI18n();
+  const copy = messages.dashboard;
   const [snapshot, setSnapshot] = useState(initialData);
   const [dialog, setDialog] = useState<DialogName>(null);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileSheet, setMobileSheet] = useState<MobileSheet>(null);
   const [importSource, setImportSource] = useState<Exclude<TransactionSource, "manual">>("wechat");
   const [selectedBalance, setSelectedBalance] = useState<MemberBalance | null>(null);
   const [selectedTransaction, setSelectedTransaction] = useState<DashboardTransaction | null>(null);
   const [transactionFilter, setTransactionFilter] = useState<TransactionCategory | "all">("all");
   const [query, setQuery] = useState("");
   const [showAllTransactions, setShowAllTransactions] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [invitationLink, setInvitationLink] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<"synced" | "syncing" | "offline">("synced");
   const refreshEpochRef = useRef(new RefreshEpoch());
   const refreshControllerRef = useRef<AbortController | null>(null);
-  const noticeSequenceRef = useRef(0);
   const mutationKeysRef = useRef(new Map<string, string>());
+  const { toasts, showToast, dismissToast } = useAnimatedToastStack({ limit: 3 });
 
   const selectedGroup = snapshot.groups.find((group) => group.id === snapshot.selectedGroupId);
+  const remainingFen = snapshot.budgetFen - snapshot.spentFen;
   const budgetRatio = snapshot.budgetFen > 0 ? snapshot.spentFen / snapshot.budgetFen : 0;
-  const remainingFen = Math.max(0, snapshot.budgetFen - snapshot.spentFen);
   const currentUserBalanceFen = snapshot.balances.find((member) => member.isCurrentUser)?.balanceFen ?? 0;
+  const monthOptions = useMemo(() => {
+    const current = currentMonthKey();
+    const values = Array.from({ length: 18 }, (_, index) => shiftMonth(current, index - 17));
+    if (!values.includes(snapshot.period.key)) values.unshift(snapshot.period.key);
+    return [...new Set(values)].sort().reverse();
+  }, [snapshot.period.key]);
+  const monthTitle = useMemo(
+    () => formatMonthTitle(snapshot.period.key, locale),
+    [locale, snapshot.period.key],
+  );
+
   const displayedTransactions = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase("fr");
-    return snapshot.transactions.filter((transaction) => {
+    const normalizedQuery = query.trim().toLocaleLowerCase(getIntlLocale(locale));
+    const filtered = snapshot.transactions.filter((transaction) => {
       const matchesCategory = transactionFilter === "all" || transaction.category === transactionFilter;
-      const matchesQuery = !normalizedQuery || `${transaction.title} ${transaction.merchant}`.toLocaleLowerCase("fr").includes(normalizedQuery);
+      const matchesQuery =
+        !normalizedQuery ||
+        `${transaction.title} ${transaction.merchant}`
+          .toLocaleLowerCase(getIntlLocale(locale))
+          .includes(normalizedQuery);
       return matchesCategory && matchesQuery;
     });
-  }, [query, snapshot.transactions, transactionFilter]);
+    return showAllTransactions ? filtered : filtered.slice(0, 6);
+  }, [locale, query, showAllTransactions, snapshot.transactions, transactionFilter]);
 
-  const showNotice = useCallback((message: string) => {
-    const noticeSequence = noticeSequenceRef.current + 1;
-    noticeSequenceRef.current = noticeSequence;
-    setNotice(message);
-    window.setTimeout(() => {
-      if (noticeSequence !== noticeSequenceRef.current) return;
-      setNotice(null);
-      setInvitationLink(null);
-    }, 6_000);
+  const updateLocation = useCallback((scope: DashboardScope, month: string, groupId?: string) => {
+    const params = new URLSearchParams({ month, scope });
+    if (scope === "group" && groupId) params.set("groupId", groupId);
+    window.history.replaceState(window.history.state, "", `/?${params.toString()}`);
   }, []);
 
   const invalidatePendingRefresh = useCallback(() => {
@@ -222,97 +235,111 @@ export function YearDashboard({ initialData, demoMode = false }: YearDashboardPr
     return created;
   }, []);
 
-  const refreshSnapshot = useCallback(async (scope = snapshot.scope, groupId = snapshot.selectedGroupId) => {
+  const refreshSnapshot = useCallback(async (
+    scope = snapshot.scope,
+    groupId = snapshot.selectedGroupId,
+    month = snapshot.period.key,
+  ) => {
     if (demoMode) {
-      const next = createDemoDashboard(scope);
-      setSnapshot(groupId && scope === "group" ? { ...next, selectedGroupId: groupId } : next);
+      const next = createDemoDashboard(scope, month, groupId);
+      setSnapshot(next);
+      setSyncState("synced");
+      updateLocation(scope, month, next.selectedGroupId);
       return;
     }
+
     refreshControllerRef.current?.abort();
     const controller = new AbortController();
     refreshControllerRef.current = controller;
     const requestEpoch = refreshEpochRef.current.begin();
     setSyncState("syncing");
     try {
-      const params = new URLSearchParams({ scope });
-      if (groupId) params.set("groupId", groupId);
+      const params = new URLSearchParams({ scope, month });
+      if (scope === "group" && groupId) params.set("groupId", groupId);
       const response = await fetch(`/api/dashboard?${params}`, {
         cache: "no-store",
         signal: controller.signal,
       });
-      const next = await readJson<DashboardSnapshot>(response);
+      const next = await readJson<DashboardSnapshot>(response, copy.notices.refreshFailed);
       if (!refreshEpochRef.current.isCurrent(requestEpoch)) return;
       setSnapshot(next);
       setSyncState("synced");
+      updateLocation(scope, month, next.selectedGroupId);
     } catch (error) {
       if (controller.signal.aborted || !refreshEpochRef.current.isCurrent(requestEpoch)) return;
       setSyncState("offline");
-      showNotice(error instanceof Error ? error.message : "Synchronisation indisponible.");
+      showToast({
+        title: error instanceof Error ? error.message : copy.notices.refreshFailed,
+        status: "error",
+      });
     } finally {
-      if (refreshControllerRef.current === controller) {
-        refreshControllerRef.current = null;
-      }
+      if (refreshControllerRef.current === controller) refreshControllerRef.current = null;
     }
-  }, [demoMode, showNotice, snapshot.scope, snapshot.selectedGroupId]);
+  }, [copy.notices.refreshFailed, demoMode, showToast, snapshot.period.key, snapshot.scope, snapshot.selectedGroupId, updateLocation]);
 
-  const mutation = useCallback(async (
+  const mutation = useCallback(async <T extends { snapshot?: DashboardSnapshot }>(
     path: string,
     body: unknown,
     demoAction: () => void,
     successMessage: string,
-  ) => {
+  ): Promise<T | undefined> => {
     if (demoMode) {
       demoAction();
-      showNotice(successMessage);
+      showToast({ title: successMessage, status: "success" });
       return undefined;
     }
+
     invalidatePendingRefresh();
     setSyncState("syncing");
+    const mutationIdentity = `${path}:${JSON.stringify(body)}`;
     try {
-      const mutationIdentity = `${path}:${JSON.stringify(body)}`;
-      const idempotencyKey = idempotencyKeyFor(mutationIdentity);
       const response = await fetch(path, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "idempotency-key": idempotencyKey,
+          "idempotency-key": idempotencyKeyFor(mutationIdentity),
         },
         body: JSON.stringify(body),
       });
-      const payload = await readJson<{ snapshot?: DashboardSnapshot; message?: string }>(response);
-      // A focus/timer refresh may have started while the mutation was in flight.
-      // Invalidate it again before committing the authoritative mutation result.
+      const payload = await readJson<T>(response, copy.notices.serverError);
       invalidatePendingRefresh();
       mutationKeysRef.current.delete(mutationIdentity);
-      if (payload.snapshot) setSnapshot(payload.snapshot);
-      else await refreshSnapshot();
+      if (payload.snapshot?.period.key === snapshot.period.key) {
+        setSnapshot(payload.snapshot);
+      } else {
+        await refreshSnapshot();
+      }
       setSyncState("synced");
-      showNotice(payload.message ?? successMessage);
+      showToast({ title: successMessage, status: "success" });
       return payload;
     } catch (error) {
       setSyncState("offline");
       throw error;
     }
-  }, [demoMode, idempotencyKeyFor, invalidatePendingRefresh, refreshSnapshot, showNotice]);
+  }, [copy.notices.serverError, demoMode, idempotencyKeyFor, invalidatePendingRefresh, refreshSnapshot, showToast, snapshot.period.key]);
 
-  const switchScope = (scope: DashboardScope) => {
+  const switchScope = useCallback((scope: DashboardScope) => {
     if (scope === snapshot.scope) return;
     if (scope === "group" && snapshot.groups.length === 0) {
       setDialog("group");
-      showNotice("Crée ton premier tricount pour commencer à partager des dépenses.");
+      showToast({ title: copy.notices.firstGroup, status: "info" });
       return;
     }
     setTransactionFilter("all");
     setShowAllTransactions(false);
-    void refreshSnapshot(scope, scope === "group" ? selectedGroup?.id ?? snapshot.groups[0]?.id : undefined);
-  };
+    void refreshSnapshot(
+      scope,
+      scope === "group" ? selectedGroup?.id ?? snapshot.groups[0]?.id : undefined,
+      snapshot.period.key,
+    );
+  }, [copy.notices.firstGroup, refreshSnapshot, selectedGroup?.id, showToast, snapshot.groups, snapshot.period.key, snapshot.scope]);
 
   useEffect(() => {
     if (demoMode) return;
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refreshSnapshot();
     };
-    const interval = window.setInterval(refreshWhenVisible, 20_000);
+    const interval = window.setInterval(refreshWhenVisible, 30_000);
     window.addEventListener("online", refreshWhenVisible);
     window.addEventListener("focus", refreshWhenVisible);
     document.addEventListener("visibilitychange", refreshWhenVisible);
@@ -327,671 +354,538 @@ export function YearDashboard({ initialData, demoMode = false }: YearDashboardPr
   useEffect(() => () => refreshControllerRef.current?.abort(), []);
 
   const selectGroup = (group: DashboardGroup) => {
-    setMobileNavOpen(false);
+    setMobileSheet(null);
     setTransactionFilter("all");
     setShowAllTransactions(false);
-    void refreshSnapshot("group", group.id);
+    void refreshSnapshot("group", group.id, snapshot.period.key);
+  };
+
+  const selectMonth = (month: string) => {
+    if (month > currentMonthKey()) return;
+    setShowAllTransactions(false);
+    void refreshSnapshot(snapshot.scope, snapshot.selectedGroupId, month);
   };
 
   const addExpense = async (payload: AddExpensePayload) => {
     await mutation(
       "/api/expenses",
-      payload,
+      { ...payload, month: snapshot.period.key },
       () => {
-      const nextTransaction: DashboardTransaction = {
-        id: `demo-${Date.now()}`,
-        title: payload.title,
-        merchant: "Saisie manuelle",
-        occurredAt: payload.occurredAt,
-        amountFen: payload.amountFen,
-        category: payload.category,
-        source: "manual",
-        paidBy: snapshot.viewer.name,
-        groupId: payload.groupId,
-        shared: Boolean(payload.groupId),
-      };
-      setSnapshot((current) => ({
-        ...current,
-        spentFen: current.spentFen + payload.amountFen,
-        transactions: [nextTransaction, ...current.transactions],
-        revision: current.revision + 1,
-      }));
+        const nextTransaction: DashboardTransaction = {
+          id: `demo-${Date.now()}`,
+          title: payload.title,
+          merchant: payload.title,
+          occurredAt: payload.occurredAt,
+          amountFen: payload.amountFen,
+          category: payload.category,
+          source: "manual",
+          paidBy: snapshot.viewer.name,
+          groupId: payload.groupId,
+          shared: Boolean(payload.groupId),
+        };
+        setSnapshot((current) => ({
+          ...current,
+          spentFen: current.spentFen + payload.amountFen,
+          transactions: [nextTransaction, ...current.transactions],
+          categories: current.categories.some((item) => item.category === payload.category)
+            ? current.categories.map((item) => item.category === payload.category
+              ? { ...item, amountFen: item.amountFen + payload.amountFen }
+              : item)
+            : [...current.categories, { category: payload.category, amountFen: payload.amountFen }],
+          revision: current.revision + 1,
+        }));
       },
-      "Dépense ajoutée et soldes recalculés.",
+      copy.notices.expenseAdded,
     );
   };
 
   const createGroup = async (payload: CreateGroupPayload) => {
-    const result = await mutation(
+    const result = await mutation<{
+      snapshot?: DashboardSnapshot;
+      invitationUrls?: string[];
+    }>(
       "/api/groups",
-      payload,
+      { ...payload, month: snapshot.period.key },
       () => {
-      const group: DashboardGroup = {
-        id: `demo-group-${Date.now()}`,
-        name: payload.name,
-        city: payload.city,
-        memberCount: 1 + payload.inviteEmails.length,
-        spentFen: 0,
-        accent: "#c9ff63",
-      };
-      setSnapshot((current) => ({ ...current, groups: [...current.groups, group], revision: current.revision + 1 }));
-      if (payload.inviteEmails.length) {
-        setInvitationLink(payload.inviteEmails.map((email) => `${window.location.origin}/join?token=demo-invitation&email=${encodeURIComponent(email)}`).join("\n"));
-      }
+        const group: DashboardGroup = {
+          id: `demo-group-${Date.now()}`,
+          name: payload.name,
+          city: payload.city,
+          memberCount: 1 + payload.inviteEmails.length,
+          spentFen: 0,
+          accent: "#c9ff63",
+        };
+        setSnapshot((current) => ({
+          ...current,
+          groups: [...current.groups, group],
+          revision: current.revision + 1,
+        }));
       },
-      "Tricount créé. Les invitations sont prêtes.",
+      copy.notices.groupCreated,
     );
-    const invitationUrls = (result as { invitationUrls?: string[] } | undefined)?.invitationUrls;
-    if (invitationUrls?.length) setInvitationLink(invitationUrls.join("\n"));
+    const invitationUrls = result?.invitationUrls;
+    if (invitationUrls?.length && navigator.clipboard) {
+      await navigator.clipboard.writeText(invitationUrls.join("\n")).catch(() => undefined);
+    }
   };
 
   const updateBudget = async (budgetFen: number) => {
     await mutation(
       "/api/budgets",
-      { budgetFen, startsOn: snapshot.academicYear.startsOn, endsOn: snapshot.academicYear.endsOn, scope: snapshot.scope, groupId: snapshot.selectedGroupId },
+      {
+        budgetFen,
+        month: snapshot.period.key,
+        scope: snapshot.scope,
+        groupId: snapshot.selectedGroupId,
+      },
       () => setSnapshot((current) => ({ ...current, budgetFen, revision: current.revision + 1 })),
-      "Budget annuel mis à jour.",
+      copy.notices.budgetUpdated,
     );
   };
 
   const inviteMember = async (email: string) => {
-    if (!selectedGroup) throw new Error("Sélectionne d’abord un tricount.");
-    if (demoMode) {
-      setSnapshot((current) => ({
+    if (!selectedGroup) throw new Error(copy.notices.groupUnavailable);
+    const result = await mutation<{ snapshot?: DashboardSnapshot; invitationUrl?: string }>(
+      `/api/groups/${selectedGroup.id}/invitations`,
+      { email, month: snapshot.period.key },
+      () => setSnapshot((current) => ({
         ...current,
-        groups: current.groups.map((group) => group.id === selectedGroup.id ? { ...group, memberCount: group.memberCount + 1 } : group),
+        groups: current.groups.map((group) => group.id === selectedGroup.id
+          ? { ...group, memberCount: group.memberCount + 1 }
+          : group),
         revision: current.revision + 1,
-      }));
-      setInvitationLink(`${window.location.origin}/join?token=demo-invitation&email=${encodeURIComponent(email)}`);
-      showNotice(`Invitation créée pour ${email}.`);
-      return;
-    }
-
-    setSyncState("syncing");
-    invalidatePendingRefresh();
-    try {
-      const mutationIdentity = `group-invitation:${selectedGroup.id}:${email}`;
-      const response = await fetch(`/api/groups/${selectedGroup.id}/invitations`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": idempotencyKeyFor(mutationIdentity),
-        },
-        body: JSON.stringify({ email }),
-      });
-      const payload = await readJson<{
-        snapshot: DashboardSnapshot;
-        invitationUrl?: string;
-        message?: string;
-      }>(response);
-      invalidatePendingRefresh();
-      mutationKeysRef.current.delete(mutationIdentity);
-      setSnapshot(payload.snapshot);
-      setSyncState("synced");
-      setInvitationLink(payload.invitationUrl ?? null);
-      showNotice(payload.message ?? `Invitation créée pour ${email}.`);
-    } catch (error) {
-      setSyncState("offline");
-      throw error;
+      })),
+      copy.notices.invitationCreated,
+    );
+    if (result?.invitationUrl && navigator.clipboard) {
+      await navigator.clipboard.writeText(result.invitationUrl).catch(() => undefined);
     }
   };
 
   const shareTransaction = async (transaction: DashboardTransaction, groupId: string) => {
-    const targetGroup = snapshot.groups.find((group) => group.id === groupId);
-    if (!targetGroup) throw new Error("Le tricount choisi n’est plus disponible.");
+    if (!snapshot.groups.some((group) => group.id === groupId)) {
+      throw new Error(copy.notices.groupUnavailable);
+    }
     await mutation(
       `/api/wallet-transactions/${transaction.id}/share`,
-      { groupId: targetGroup.id },
+      { groupId, month: snapshot.period.key },
       () => setSnapshot((current) => ({
         ...current,
-        transactions: current.transactions.map((item) => item.id === transaction.id ? { ...item, groupId: targetGroup.id, shared: true } : item),
+        transactions: current.transactions.map((item) => item.id === transaction.id
+          ? { ...item, groupId, shared: true }
+          : item),
         revision: current.revision + 1,
       })),
-      `« ${transaction.title} » est maintenant partagé avec ${targetGroup.name}.`,
+      copy.notices.transactionShared,
     );
   };
 
   const settleBalance = async (memberId: string, amountFen: number) => {
-    if (!selectedGroup) throw new Error("Sélectionne d’abord un tricount.");
+    if (!selectedGroup) throw new Error(copy.notices.groupUnavailable);
     await mutation(
       `/api/groups/${selectedGroup.id}/settlements`,
-      { memberId, amountFen },
+      { memberId, amountFen, month: snapshot.period.key },
       () => setSnapshot((current) => ({
         ...current,
-        balances: current.balances.map((balance) => balance.id === memberId ? { ...balance, balanceFen: Math.sign(balance.balanceFen) * Math.max(0, Math.abs(balance.balanceFen) - amountFen) } : balance),
+        balances: current.balances.map((balance) => balance.id === memberId
+          ? { ...balance, balanceFen: Math.sign(balance.balanceFen) * Math.max(0, Math.abs(balance.balanceFen) - amountFen) }
+          : balance),
         revision: current.revision + 1,
       })),
-      "Remboursement enregistré.",
+      copy.notices.settlementRecorded,
     );
   };
 
   const signOut = async () => {
     setSyncState("syncing");
-
     try {
       const { error } = await authClient.signOut();
-      if (error) {
-        throw new Error(error.message || "La session n’a pas pu être fermée.");
-      }
-
+      if (error) throw new Error(error.message || copy.notices.signedOutFailed);
       router.replace("/login");
       router.refresh();
     } catch (error) {
       setSyncState("offline");
-      showNotice(error instanceof Error ? error.message : "Déconnexion impossible. Réessaie dans un instant.");
+      showToast({
+        title: error instanceof Error ? error.message : copy.notices.signedOutFailed,
+        status: "error",
+      });
     }
+  };
+
+  const openImport = (source: "wechat" | "alipay") => {
+    setImportSource(source);
+    setMobileSheet(null);
+    setDialog("import");
+  };
+
+  const openExpense = () => {
+    setMobileSheet(null);
+    setDialog("expense");
   };
 
   return (
     <div className="min-h-dvh bg-[#f3f1e9] text-[#17352e]">
-      <DashboardSidebar
-        groups={snapshot.groups}
-        insight={snapshot.busiestDay}
-        selectedGroupId={snapshot.selectedGroupId}
-        scope={snapshot.scope}
-        open={mobileNavOpen}
-        onClose={() => setMobileNavOpen(false)}
-        onCreateGroup={() => setDialog("group")}
+      <DesktopSidebar
+        snapshot={snapshot}
+        selectedGroup={selectedGroup}
+        locale={locale}
+        copy={copy}
+        onPersonal={() => void refreshSnapshot("personal", undefined, snapshot.period.key)}
         onSelectGroup={selectGroup}
-        onSelectPersonal={() => {
-          setMobileNavOpen(false);
-          switchScope("personal");
-        }}
-        onOpenWallet={() => {
-          setMobileNavOpen(false);
-          if (snapshot.scope !== "personal") switchScope("personal");
-          window.requestAnimationFrame(() => document.querySelector("#recent-transactions")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-        }}
-        onOpenImports={() => {
-          setMobileNavOpen(false);
-          setImportSource("wechat");
-          setDialog("import");
-        }}
+        onCreateGroup={() => setDialog("group")}
+        onSignOut={() => void signOut()}
+        syncing={syncState === "syncing"}
       />
 
-      <main className="min-h-dvh lg:pl-[224px]">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-[#e5e2d9]/80 bg-[#f3f1e9]/88 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
-          <Button type="button" variant="ghost" size="icon" className="rounded-xl lg:hidden" onClick={() => setMobileNavOpen(true)} aria-label="Ouvrir la navigation">
-            <Menu />
-          </Button>
-
-          <div className="flex rounded-xl bg-[#e7e6de] p-1" aria-label="Portée du tableau de bord">
-            <button
-              type="button"
-              onClick={() => switchScope("personal")}
-              aria-pressed={snapshot.scope === "personal"}
-              className={cn(
-                "rounded-lg px-3 py-2 text-xs font-semibold transition sm:px-4",
-                snapshot.scope === "personal" ? "bg-white text-[#173f35] shadow-sm" : "text-[#778079] hover:text-[#173f35]",
-              )}
+      <main className="min-h-dvh lg:pl-[252px]">
+        <header className="sticky top-0 z-30 border-b border-[#173f35]/8 bg-[#f3f1e9]/92 backdrop-blur-xl">
+          <div className="mx-auto grid min-h-16 max-w-[1500px] grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-x-2 gap-y-1 px-4 py-2 sm:px-6 lg:flex lg:h-16 lg:flex-nowrap lg:gap-3 lg:px-8 lg:py-0">
+            <MotionButton
+              variant="ghost"
+              size="icon"
+              className="size-11 rounded-xl lg:hidden"
+              onClick={() => setMobileSheet("menu")}
+              aria-label={copy.navigation.openMenu}
             >
-              Personnel
-            </button>
-            <button
-              type="button"
-              onClick={() => switchScope("group")}
-              aria-pressed={snapshot.scope === "group"}
-              className={cn(
-                "rounded-lg px-3 py-2 text-xs font-semibold transition sm:px-4",
-                snapshot.scope === "group" ? "bg-white text-[#173f35] shadow-sm" : "text-[#778079] hover:text-[#173f35]",
-              )}
+              <Menu className="size-5" />
+            </MotionButton>
+
+            <Tabs
+              value={snapshot.scope}
+              onValueChange={(value) => switchScope(value as DashboardScope)}
+              variant="segment"
+              className="justify-self-center lg:ml-0"
             >
-              Tricount
-            </button>
-          </div>
+              <TabsList className="bg-[#e7e6de]">
+                <TabsTrigger value="personal" className="min-h-10 px-3 sm:px-4">
+                  {copy.scope.personal}
+                </TabsTrigger>
+                <TabsTrigger value="group" className="min-h-10 px-3 sm:px-4">
+                  {copy.scope.group}
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="hidden h-10 rounded-xl px-3 text-xs font-semibold sm:inline-flex">
-                <CalendarDays className="size-4 text-[#668077]" />
-                {snapshot.academicYear.label}
-                <ChevronDown className="size-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56 rounded-xl border-[#deddd5] bg-[#fbfaf5] p-2">
-              <DropdownMenuLabel>Année académique</DropdownMenuLabel>
-              <DropdownMenuItem className="rounded-lg bg-[#eff6df]"><Check /> {snapshot.academicYear.label}</DropdownMenuItem>
-              <DropdownMenuItem className="rounded-lg" disabled>2026–2027 · bientôt</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            <div className="hidden min-w-px flex-1 lg:block" />
 
-          <div className="ml-auto flex items-center gap-2">
-            <SyncStateBadge state={syncState} onRefresh={() => void refreshSnapshot()} />
-            <Button type="button" variant="ghost" size="icon" className="hidden rounded-xl sm:inline-flex" aria-label="Notifications" onClick={() => showNotice("Tout est à jour, aucune nouvelle notification.")}>
-              <Bell />
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button type="button" className="flex items-center gap-2 rounded-xl p-1.5 text-left transition hover:bg-white/65" aria-label="Menu du compte">
-                  <Avatar className="size-8 ring-2 ring-white">
-                    {snapshot.viewer.avatarUrl ? <AvatarImage src={snapshot.viewer.avatarUrl} alt="" /> : null}
-                    <AvatarFallback>{initials(snapshot.viewer.name)}</AvatarFallback>
-                  </Avatar>
-                  <span className="hidden text-xs font-semibold md:block">{snapshot.viewer.name}</span>
-                  <ChevronDown className="hidden size-3.5 text-[#778079] md:block" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-60 rounded-xl border-[#deddd5] bg-[#fbfaf5] p-2">
-                <DropdownMenuLabel>
-                  <span className="block">{snapshot.viewer.name}</span>
-                  <span className="mt-1 block truncate text-xs font-normal text-[#778079]">{snapshot.viewer.email}</span>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="rounded-lg" disabled><Settings /> Paramètres · bientôt</DropdownMenuItem>
-                <DropdownMenuItem
-                  className="rounded-lg"
-                  onSelect={() => {
-                    setImportSource("wechat");
-                    setDialog("import");
-                  }}
-                ><CircleHelp /> Aide pour les exports</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="rounded-lg text-[#a8432c]" onSelect={() => void signOut()}><LogOut /> Se déconnecter</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="col-start-3 row-start-1 lg:order-2">
+              <SyncButton
+                state={syncState}
+                label={copy.sync.refresh}
+                onRefresh={() => void refreshSnapshot()}
+              />
+            </div>
+
+            <div className="col-span-3 row-start-2 flex justify-center lg:order-1">
+              <MonthControl
+                month={snapshot.period.key}
+                monthOptions={monthOptions}
+                locale={locale}
+                copy={copy}
+                onSelect={selectMonth}
+              />
+            </div>
           </div>
         </header>
 
-        <div className="mx-auto max-w-[1540px] px-4 py-5 sm:px-6 lg:px-8 lg:py-3">
-          {syncState === "offline" ? (
-            <div className="mb-4 flex items-center gap-3 rounded-2xl border border-[#edc9b4] bg-[#fff3e9] px-4 py-3 text-sm text-[#7b4b32]" role="status">
-              <CloudOff className="size-4 shrink-0" />
-              <p className="flex-1">Hors ligne : les dernières données synchronisées restent visibles.</p>
-              <button type="button" className="font-semibold underline underline-offset-4" onClick={() => void refreshSnapshot()}>Réessayer</button>
-            </div>
-          ) : null}
-
-          <section aria-labelledby="dashboard-title" className="overflow-hidden rounded-[26px] bg-[#173f35] text-white shadow-[0_24px_70px_rgba(23,63,53,0.14)]">
-            <div className="grid min-h-[244px] lg:grid-cols-[0.92fr_1.5fr]">
-              <div className="relative flex flex-col justify-between border-b border-white/10 px-6 py-6 sm:px-8 lg:border-r lg:border-b-0 lg:px-9 lg:py-6">
-                <div>
-                  <div className="flex items-center gap-2 text-xs font-semibold text-[#c7d2cc]">
-                    <span className="size-2 rounded-full bg-[#c9ff63]" />
-                    {snapshot.scope === "personal" ? "Mon année en Chine" : selectedGroup?.name ?? "Mon tricount"}
-                  </div>
-                  <h1 id="dashboard-title" className="mt-4 text-[clamp(2rem,4vw,4.25rem)] font-semibold leading-[0.92] tracking-[-0.065em] tabular-nums">
-                    {formatAmount(snapshot.spentFen, true)}
-                  </h1>
-                  <p className="mt-3 text-sm text-white/58">dépensés sur la période</p>
-                </div>
-
-                <div className="mt-8 grid grid-cols-2 gap-5">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45">{snapshot.budgetFen > 0 ? "Budget restant" : "Budget annuel"}</p>
-                    <p className="mt-2 text-lg font-semibold tabular-nums">{snapshot.budgetFen > 0 ? formatAmount(remainingFen, true) : "À définir"}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45">vs. période passée</p>
-                    {snapshot.previousPeriodDelta === null ? (
-                      <p className="mt-2 text-sm font-semibold text-white/58">Après une 2e période</p>
-                    ) : (
-                      <p className={cn("mt-2 flex items-center gap-1 text-lg font-semibold", snapshot.previousPeriodDelta <= 0 ? "text-[#c9ff63]" : "text-[#ffb48a]")}>
-                        {snapshot.previousPeriodDelta <= 0 ? <ArrowDownRight className="size-4" /> : <ArrowUpRight className="size-4" />}
-                        {Math.abs(snapshot.previousPeriodDelta * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="px-4 py-5 sm:px-7 sm:py-6 lg:px-8 lg:py-7">
-                <div className="flex items-center justify-between px-2">
-                  <div>
-                    <p className="text-xs font-semibold">Dépenses mensuelles</p>
-                    <p className="mt-1 text-[11px] text-white/45">Barres : réel · ligne : budget</p>
-                  </div>
-                  <button type="button" onClick={() => setDialog("budget")} className="rounded-lg border border-white/12 px-3 py-2 text-[11px] font-semibold text-white/72 transition hover:bg-white/8 hover:text-white">
-                    Modifier le budget
-                  </button>
-                </div>
-                <div className="mt-3 h-[150px] w-full" aria-label="Graphique des dépenses mensuelles et du budget">
-                  <MeasuredChart height={150} fallbackWidth={520}>
-                    {(width) => <ComposedChart width={width} height={150} data={snapshot.monthly} margin={{ top: 8, right: 6, bottom: 0, left: -14 }}>
-                      <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.1)" />
-                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "rgba(255,255,255,0.48)", fontSize: 10 }} dy={8} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fill: "rgba(255,255,255,0.36)", fontSize: 9 }} tickFormatter={(value) => `${Math.round(Number(value) / 100_000)}k`} />
-                      <Tooltip
-                        cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                        content={({ active, payload, label }) => active && payload?.length ? (
-                          <div className="rounded-xl border border-white/10 bg-[#0f2e27] px-3 py-2 text-xs shadow-xl">
-                            <p className="font-semibold text-white">{label}</p>
-                            <p className="mt-1 text-[#c9ff63]">Dépensé · {formatAmount(Number(payload[0]?.value ?? 0), true)}</p>
-                            <p className="text-white/55">Budget · {formatAmount(Number(payload[1]?.value ?? 0), true)}</p>
-                          </div>
-                        ) : null}
-                      />
-                      <Bar dataKey="spentFen" fill="#c9ff63" radius={[5, 5, 2, 2]} maxBarSize={28} />
-                      <Line type="monotone" dataKey="budgetFen" stroke="#f8b36d" strokeWidth={2} dot={false} strokeDasharray="5 5" />
-                    </ComposedChart>}
-                  </MeasuredChart>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <div className="mt-5 grid gap-5 min-[1180px]:grid-cols-[minmax(0,1fr)_300px]">
-            <div className="min-w-0 space-y-5">
-              <section className="grid gap-4 md:grid-cols-[1.35fr_0.65fr]" aria-labelledby="imports-title">
-                <div className="rounded-[24px] border border-white bg-[#fbfaf5] p-4 shadow-[0_12px_40px_rgba(50,55,44,0.045)] sm:p-5">
-                  <div className="flex items-center gap-2">
-                    <h2 id="imports-title" className="text-lg font-semibold tracking-[-0.035em]">Importer mes paiements</h2>
-                    <Badge className="border-0 bg-[#edf5dd] text-[#55763c]">Privé</Badge>
-                  </div>
-                  <p className="mt-1.5 text-xs leading-5 text-[#708078]">
-                    Exports analysés sans doublons ni remboursements oubliés.
-                  </p>
-                  <div className="mt-3 flex gap-2">
-                    <ImportButton source="wechat" onClick={() => { setImportSource("wechat"); setDialog("import"); }} />
-                    <ImportButton source="alipay" onClick={() => { setImportSource("alipay"); setDialog("import"); }} />
-                  </div>
-                  <div className="mt-3 border-t border-[#e8e5dc] pt-3 text-[10px] text-[#7b857f]">
-                    <span className="flex items-center gap-1.5">
-                      <Check className="size-3.5 text-[#5e8d45]" />
-                      {snapshot.imports.reduce((sum, item) => sum + item.transactionCount, 0).toLocaleString("fr-FR")} opérations · fichier brut non conservé
-                    </span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setDialog("expense")}
-                  className="group flex min-h-44 flex-col justify-between rounded-[24px] bg-[#c9ff63] p-5 text-left text-[#173f35] shadow-[0_12px_40px_rgba(116,155,62,0.12)] transition hover:-translate-y-0.5 hover:bg-[#bff45e] sm:p-6"
-                >
-                  <span className="grid size-10 place-items-center rounded-xl bg-[#173f35] text-white"><Plus className="size-5" /></span>
-                  <span>
-                    <strong className="block text-lg tracking-[-0.035em]">Ajouter une dépense</strong>
-                    <span className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#4f7044]">Saisie manuelle <ChevronRight className="size-3.5 transition group-hover:translate-x-0.5" /></span>
-                  </span>
-                </button>
-              </section>
-
-              <section className="grid gap-5 lg:grid-cols-[0.82fr_1.18fr]">
-                <div className="rounded-[24px] border border-white bg-[#fbfaf5] p-5 shadow-[0_12px_40px_rgba(50,55,44,0.045)] sm:p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h2 className="text-lg font-semibold tracking-[-0.035em]">Où part l’argent</h2>
-                      <p className="mt-1 text-xs text-[#7b857f]">Année {snapshot.academicYear.label}</p>
-                    </div>
-                    <button type="button" onClick={() => setTransactionFilter("all")} className="text-xs font-semibold text-[#4e7340] hover:underline">Tout voir</button>
-                  </div>
-
-                  {snapshot.categories.length ? (
-                    <>
-                      <div className="relative mt-2 h-[210px]">
-                        <MeasuredChart height={210} fallbackWidth={260}>
-                          {(width) => <PieChart width={width} height={210}>
-                            <Pie data={snapshot.categories} dataKey="amountFen" nameKey="label" innerRadius={57} outerRadius={88} paddingAngle={2} stroke="none">
-                              {snapshot.categories.map((item) => <Cell key={item.category} fill={item.color} />)}
-                            </Pie>
-                            <Tooltip formatter={(value) => formatAmount(Number(value), true)} contentStyle={{ borderRadius: 12, borderColor: "#e3e2da", fontSize: 12 }} />
-                          </PieChart>}
-                        </MeasuredChart>
-                        <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
-                          <div>
-                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#89918c]">Total</p>
-                            <p className="mt-1 text-lg font-semibold tracking-[-0.04em] tabular-nums">{formatAmount(snapshot.spentFen, true)}</p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        {snapshot.categories.map((item) => {
-                          const CategoryIcon = categoryIcons[item.category];
-                          const active = transactionFilter === item.category;
-                          return (
-                            <button
-                              type="button"
-                              key={item.category}
-                              onClick={() => setTransactionFilter(active ? "all" : item.category)}
-                              className={cn("flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition hover:bg-[#f0efe8]", active && "bg-[#edf5dd]")}
-                            >
-                              <span className="grid size-7 place-items-center rounded-lg" style={{ backgroundColor: `${item.color}22`, color: item.color }}><CategoryIcon className="size-3.5" /></span>
-                              <span className="min-w-0 flex-1 truncate text-xs font-medium">{item.label}</span>
-                              <span className="text-xs font-semibold tabular-nums">{formatAmount(item.amountFen, true)}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : <EmptyState title="Aucune catégorie" description="Importe quelques opérations pour voir la répartition." />}
-                </div>
-
-                <div id="recent-transactions" className="min-w-0 scroll-mt-24 overflow-hidden rounded-[24px] border border-white bg-[#fbfaf5] shadow-[0_12px_40px_rgba(50,55,44,0.045)]">
-                  <div className="flex flex-col gap-3 border-b border-[#e9e6de] px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                    <div>
-                      <h2 className="text-lg font-semibold tracking-[-0.035em]">Transactions récentes</h2>
-                      <p className="mt-1 text-xs text-[#7b857f]">
-                        {transactionFilter === "all" ? "Toutes les catégories" : categoryLabels[transactionFilter]}
-                      </p>
-                    </div>
-                    <label className="flex h-9 items-center gap-2 rounded-xl bg-[#efeee7] px-3 text-[#728078] focus-within:ring-2 focus-within:ring-[#94bc67]/40">
-                      <Search className="size-3.5" />
-                      <input
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        placeholder="Rechercher"
-                        aria-label="Rechercher une transaction"
-                        className="w-32 bg-transparent text-xs text-[#17352e] outline-none placeholder:text-[#8c948f]"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="divide-y divide-[#ece9e1]">
-                    {displayedTransactions.length ? displayedTransactions.slice(0, showAllTransactions ? undefined : 7).map((transaction) => (
-                      <TransactionRow
-                        key={transaction.id}
-                        transaction={transaction}
-                        onShare={() => {
-                          setSelectedTransaction(transaction);
-                          setDialog("share");
-                        }}
-                      />
-                    )) : <EmptyState title="Aucun résultat" description="Essaie une autre recherche ou enlève le filtre." />}
-                  </div>
-                  {displayedTransactions.length > 7 ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowAllTransactions((current) => !current)}
-                      aria-expanded={showAllTransactions}
-                      className="flex w-full items-center justify-center gap-1 border-t border-[#e9e6de] px-5 py-4 text-xs font-semibold text-[#4e7340] hover:bg-[#f6f5ef]"
-                    >
-                      {showAllTransactions ? "Réduire la liste" : `Voir les ${displayedTransactions.length} opérations`}
-                      <ChevronRight className={cn("size-3.5 transition", showAllTransactions && "rotate-90")} />
-                    </button>
-                  ) : null}
-                </div>
-              </section>
-            </div>
-
-            <aside className="space-y-5" aria-label="Informations complémentaires">
-              {snapshot.scope === "group" ? (
-                <section className="rounded-[24px] border border-white bg-[#fbfaf5] p-5 shadow-[0_12px_40px_rgba(50,55,44,0.045)]">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8a928d]">Soldes du groupe</p>
-                      <h2 className="mt-1 text-lg font-semibold tracking-[-0.035em]">Qui doit quoi</h2>
-                    </div>
-                    <Button type="button" variant="ghost" size="icon-sm" className="rounded-lg" onClick={() => setDialog("member")} aria-label="Inviter un membre"><UserPlus /></Button>
-                  </div>
-                  <div className="mt-5 space-y-2">
-                    {snapshot.balances.length ? snapshot.balances.map((member) => {
-                      const canSettle = !member.isCurrentUser && member.balanceFen !== 0 && currentUserBalanceFen !== 0 && Math.sign(member.balanceFen) !== Math.sign(currentUserBalanceFen);
-                      return (
-                      <button
-                        type="button"
-                        key={member.id}
-                        onClick={() => {
-                          if (!canSettle) return;
-                          setSelectedBalance(member);
-                          setDialog("settlement");
-                        }}
-                        disabled={!canSettle}
-                        className="flex w-full items-center gap-3 rounded-2xl px-2 py-2.5 text-left transition enabled:hover:bg-[#f0efe8] disabled:cursor-default"
-                      >
-                        <Avatar className="size-9 border-2 border-white shadow-sm">
-                          {member.avatarUrl ? <AvatarImage src={member.avatarUrl} alt="" /> : null}
-                          <AvatarFallback className="bg-[#e6ecdf] text-xs font-semibold text-[#45624e]">{initials(member.name)}</AvatarFallback>
-                        </Avatar>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-semibold">{member.name}</span>
-                          <span className="mt-0.5 block text-[10px] text-[#87908b]">{member.isCurrentUser ? "Moi" : member.balanceFen === 0 ? "À jour" : canSettle ? "Cliquer pour régler" : "Solde net"}</span>
-                        </span>
-                        <span className={cn("text-sm font-semibold tabular-nums", member.balanceFen > 0 ? "text-[#3c7d42]" : member.balanceFen < 0 ? "text-[#bd633e]" : "text-[#87908b]")}>
-                          {member.balanceFen > 0 ? "+" : ""}{formatAmount(member.balanceFen, true)}
-                        </span>
-                      </button>
-                      );
-                    }) : <EmptyState title="Tous à zéro" description="Les prochains soldes apparaîtront ici." compact />}
-                  </div>
-                  <Button type="button" variant="outline" onClick={() => setDialog("member")} className="mt-5 h-10 w-full rounded-xl border-dashed bg-transparent text-xs">
-                    <UserPlus /> Inviter un ami
-                  </Button>
-                </section>
-              ) : (
-                <section className="rounded-[24px] bg-[#e7efd8] p-5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#65745e]">Vue groupe</p>
-                  <h2 className="mt-2 text-lg font-semibold tracking-[-0.035em]">Les comptes restent séparés</h2>
-                  <p className="mt-2 text-xs leading-5 text-[#667368]">Tes imports sont privés. Seules les dépenses que tu choisis de partager deviennent visibles.</p>
-                  <Button type="button" onClick={() => switchScope("group")} className="mt-4 h-10 rounded-xl bg-[#173f35] text-xs text-white hover:bg-[#245848]"><Users /> Ouvrir le tricount</Button>
-                </section>
-              )}
-
-              <section className="rounded-[24px] border border-white bg-[#fbfaf5] p-5 shadow-[0_12px_40px_rgba(50,55,44,0.045)]">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8a928d]">Budget consommé</p>
-                  <button type="button" onClick={() => setDialog("budget")} className="text-[#738078] hover:text-[#173f35]" aria-label="Modifier le budget"><Ellipsis className="size-4" /></button>
-                </div>
-                <div className="mt-4 flex items-end justify-between gap-3">
-                  <p className="text-3xl font-semibold tracking-[-0.055em] tabular-nums">{snapshot.budgetFen > 0 ? `${Math.round(budgetRatio * 100)} %` : "—"}</p>
-                  <p className="pb-1 text-xs text-[#7b857f]">{snapshot.budgetFen > 0 ? `sur ${formatAmount(snapshot.budgetFen, true)}` : "Budget à définir"}</p>
-                </div>
-                <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#e6e7df]">
-                  <div className={cn("h-full rounded-full", budgetRatio > 1 ? "bg-[#e07850]" : "bg-[#8fcf52]")} style={{ width: `${Math.min(100, budgetRatio * 100)}%` }} />
-                </div>
-                <p className="mt-3 text-xs leading-5 text-[#6f7c75]">
-                  {snapshot.budgetFen <= 0
-                    ? "Ajoute un budget pour suivre ton rythme sur toute l’année."
-                    : budgetRatio <= 1
-                      ? `${formatAmount(remainingFen, true)} disponibles jusqu’au ${formatDayMonth(snapshot.academicYear.endsOn)}.`
-                      : `Budget dépassé de ${formatAmount(snapshot.spentFen - snapshot.budgetFen, true)}.`}
+        <PullToRefresh
+          onRefresh={() => refreshSnapshot()}
+          refreshing={syncState === "syncing"}
+          pullingLabel={copy.sync.pull}
+          releaseLabel={copy.sync.release}
+          refreshingLabel={copy.sync.refreshing}
+          ariaLabel={copy.sync.refresh}
+          contentClassName="min-h-[calc(100dvh-4rem)]"
+        >
+          <motion.div
+            key={`${snapshot.scope}-${snapshot.period.key}-${snapshot.selectedGroupId ?? "personal"}`}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: reduceMotion ? 0.08 : 0.22 }}
+            className="mx-auto max-w-[1500px] space-y-5 px-4 py-5 pb-28 sm:px-6 sm:py-7 lg:px-8 lg:pb-10"
+          >
+            <div className="flex items-end justify-between gap-3 lg:hidden">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6a786f]">
+                  {snapshot.scope === "group" ? selectedGroup?.name ?? copy.scope.group : copy.navigation.personalWallet}
                 </p>
-              </section>
+                <h1 className="mt-1 truncate text-2xl font-semibold tracking-[-0.05em]">
+                  {monthTitle}
+                </h1>
+              </div>
+            </div>
 
-              <section className="overflow-hidden rounded-[24px] bg-[#f0dfcd] p-5">
-                <div className="flex items-start justify-between">
-                  <span className="grid size-10 place-items-center rounded-xl bg-[#173f35] text-white"><Landmark className="size-5" /></span>
-                  <Badge className="border-0 bg-white/55 text-[#6f5948]">{snapshot.topMerchant?.visits ?? 0} fois</Badge>
-                </div>
-                <p className="mt-7 text-[10px] font-bold uppercase tracking-[0.16em] text-[#826b58]">Marchand n°1</p>
-                <h2 className="mt-2 truncate text-xl font-semibold tracking-[-0.04em]">{snapshot.topMerchant?.name ?? "Pas encore de données"}</h2>
-                <p className="mt-1 text-sm font-semibold tabular-nums text-[#7b5c45]">{snapshot.topMerchant ? formatAmount(snapshot.topMerchant.amountFen, true) : "—"}</p>
-                <div className="mt-5 flex items-center justify-between border-t border-[#d9c4af] pt-4 text-xs text-[#735f4f]">
-                  <span>Jour le plus dépensier</span>
-                  <strong>{snapshot.busiestDay?.label ?? "—"}</strong>
-                </div>
-              </section>
-            </aside>
-          </div>
-        </div>
+            <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.65fr)]">
+              <HeroCard
+                snapshot={snapshot}
+                locale={locale}
+                monthTitle={monthTitle}
+                copy={copy}
+                remainingFen={remainingFen}
+                budgetRatio={budgetRatio}
+                onSetBudget={() => setDialog("budget")}
+              />
+              <QuickActions
+                copy={copy}
+                onExpense={openExpense}
+                onWechat={() => openImport("wechat")}
+                onAlipay={() => openImport("alipay")}
+                onGroup={() => setDialog("group")}
+              />
+            </section>
+
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <MetricCard
+                icon={Utensils}
+                label={copy.metrics.averageRestaurant}
+                value={snapshot.metrics.averageRestaurantPaymentFen === null
+                  ? copy.metrics.noData
+                  : formatCny(snapshot.metrics.averageRestaurantPaymentFen, false, locale)}
+                detail={`${snapshot.metrics.restaurantPaymentCount} ${copy.metrics.restaurantPayments}`}
+                tone="lime"
+              />
+              <MetricCard
+                icon={ShoppingBasket}
+                label={copy.metrics.groceries}
+                value={formatCny(snapshot.metrics.groceriesSpendFen, false, locale)}
+                detail={categoryPercent(snapshot, "groceries", locale)}
+                tone="aqua"
+              />
+              <MetricCard
+                icon={CircleDollarSign}
+                label={snapshot.metrics.availablePerDayFen === null
+                  ? copy.metrics.averagePerDay
+                  : copy.metrics.availablePerDay}
+                value={formatCny(
+                  snapshot.metrics.availablePerDayFen ?? snapshot.metrics.averageDailySpendFen ?? 0,
+                  false,
+                  locale,
+                )}
+                detail={snapshot.budgetFen > 0 ? copy.hero.monthlyBudget : copy.hero.exactTotal}
+                tone="sand"
+              />
+              <MetricCard
+                icon={CalendarDays}
+                label={copy.metrics.largestDay}
+                value={snapshot.biggestDay
+                  ? formatCny(snapshot.biggestDay.amountFen, false, locale)
+                  : copy.metrics.noData}
+                detail={snapshot.biggestDay ? formatShortDate(snapshot.biggestDay.date, locale) : "—"}
+                tone="peach"
+              />
+            </section>
+
+            <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+              <SixMonthTrendChart trend={snapshot.trend} locale={locale} copy={copy.charts} />
+              <CategoryBreakdown
+                snapshot={snapshot}
+                locale={locale}
+                copy={copy}
+                selected={transactionFilter}
+                onSelect={(category) => {
+                  setTransactionFilter(category);
+                  document.querySelector("#transactions")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              />
+            </section>
+
+            <section className={cn(
+              "grid min-w-0 gap-4",
+              snapshot.scope === "group" && "xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]",
+            )}>
+              <TransactionsCard
+                snapshot={snapshot}
+                locale={locale}
+                copy={copy}
+                query={query}
+                onQueryChange={setQuery}
+                filter={transactionFilter}
+                onFilterChange={setTransactionFilter}
+                transactions={displayedTransactions}
+                expanded={showAllTransactions}
+                onToggleExpanded={() => setShowAllTransactions((current) => !current)}
+                onShare={(transaction) => {
+                  setSelectedTransaction(transaction);
+                  setDialog("share");
+                }}
+              />
+
+              {snapshot.scope === "group" ? (
+                <BalancesCard
+                  balances={snapshot.balances}
+                  locale={locale}
+                  copy={copy}
+                  onInvite={() => setDialog("member")}
+                  onSettle={(member) => {
+                    setSelectedBalance(member);
+                    setDialog("settlement");
+                  }}
+                />
+              ) : null}
+            </section>
+          </motion.div>
+        </PullToRefresh>
       </main>
 
-      {notice ? (
-        <div role="status" className="fixed right-4 bottom-4 z-[70] flex max-w-sm items-center gap-3 rounded-2xl bg-[#173f35] px-4 py-3 text-sm text-white shadow-2xl sm:right-6 sm:bottom-6">
-          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#c9ff63] text-[#173f35]"><Check className="size-3.5" /></span>
-          <p className="leading-5">{notice}</p>
-          {invitationLink ? (
-            <button
-              type="button"
-              onClick={() => {
-                void navigator.clipboard
-                  .writeText(invitationLink)
-                  .then(() => {
-                    setInvitationLink(null);
-                    showNotice(invitationLink.includes("\n") ? "Liens d’invitation copiés." : "Lien d’invitation copié.");
-                  })
-                  .catch(() => {
-                    setInvitationLink(null);
-                    showNotice("Copie indisponible dans ce navigateur.");
-                  });
-              }}
-              className="shrink-0 rounded-lg bg-[#c9ff63] px-2.5 py-1.5 text-xs font-semibold text-[#173f35] hover:bg-[#b8ef55]"
-            >
-              {invitationLink.includes("\n") ? "Copier les liens" : "Copier le lien"}
-            </button>
-          ) : null}
-          <button
-            type="button"
+      <MotionButton
+        size="lg"
+        ripple
+        className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 z-40 h-14 rounded-2xl bg-[#173f35] px-5 text-white shadow-[0_16px_38px_rgba(23,63,53,0.28)] lg:hidden"
+        onClick={() => setMobileSheet("actions")}
+      >
+        <Plus className="size-5" />
+        {copy.actions.add}
+      </MotionButton>
+
+      <MobileMenuSheet
+        open={mobileSheet === "menu"}
+        onOpenChange={(open) => setMobileSheet(open ? "menu" : null)}
+        snapshot={snapshot}
+        copy={copy}
+        languageLabel={messages.language.label}
+        onPersonal={() => {
+          setMobileSheet(null);
+          void refreshSnapshot("personal", undefined, snapshot.period.key);
+        }}
+        onSelectGroup={selectGroup}
+        onCreateGroup={() => {
+          setMobileSheet(null);
+          setDialog("group");
+        }}
+        onSignOut={() => void signOut()}
+      />
+
+      <BottomSheet
+        open={mobileSheet === "actions"}
+        onOpenChange={(open) => setMobileSheet(open ? "actions" : null)}
+        snapPoints={["auto"]}
+        title={copy.actions.title}
+        closeLabel={copy.navigation.closeSheet}
+      >
+        <div className="grid gap-2 pt-2">
+          <SheetAction icon={PencilLine} label={copy.actions.addExpense} onClick={openExpense} />
+          <SheetAction icon={SiWechat} label={copy.actions.importWechat} onClick={() => openImport("wechat")} brand="wechat" />
+          <SheetAction icon={SiAlipay} label={copy.actions.importAlipay} onClick={() => openImport("alipay")} brand="alipay" />
+          <SheetAction
+            icon={Users}
+            label={copy.actions.createGroup}
             onClick={() => {
-              noticeSequenceRef.current += 1;
-              setNotice(null);
-              setInvitationLink(null);
+              setMobileSheet(null);
+              setDialog("group");
             }}
-            className="ml-1 text-white/55 hover:text-white"
-            aria-label="Fermer"
-          ><X className="size-4" /></button>
+          />
         </div>
+      </BottomSheet>
+
+      <AnimatedToastStack
+        toasts={toasts}
+        onDismiss={dismissToast}
+        position="bottom-center"
+        placement="fixed"
+        classNames={{ root: "bottom-[calc(5.75rem+env(safe-area-inset-bottom))] lg:bottom-6" }}
+      />
+
+      {dialog === "expense" ? (
+        <AddExpenseDialog
+          open
+          onOpenChange={(open) => setDialog(open ? "expense" : null)}
+          groups={snapshot.scope === "group" && selectedGroup ? [selectedGroup] : snapshot.groups}
+          selectedGroupId={snapshot.scope === "group" ? snapshot.selectedGroupId : undefined}
+          members={snapshot.scope === "group" ? snapshot.balances : []}
+          month={snapshot.period.key}
+          onCreate={addExpense}
+        />
       ) : null}
-
-      {dialog === "expense" ? <AddExpenseDialog
-        open
-        onOpenChange={(open) => setDialog(open ? "expense" : null)}
-        groups={snapshot.scope === "group" && selectedGroup ? [selectedGroup] : []}
-        selectedGroupId={snapshot.scope === "group" ? snapshot.selectedGroupId : undefined}
-        members={snapshot.scope === "group" ? snapshot.balances : []}
-        startsOn={snapshot.academicYear.startsOn}
-        endsOn={snapshot.academicYear.endsOn}
-        onCreate={addExpense}
-      /> : null}
-      {dialog === "group" ? <CreateGroupDialog open onOpenChange={(open) => setDialog(open ? "group" : null)} onCreate={createGroup} /> : null}
-      {dialog === "import" ? <ImportWalletDialog
-        open
-        onOpenChange={(open) => setDialog(open ? "import" : null)}
-        initialSource={importSource}
-        onPreview={async (source, file) => {
-          if (demoMode) {
-            const accepted = Math.max(8, Math.min(640, Math.round(file.size / 180)));
-            return { importId: `demo-${source}-${Date.now()}`, accepted, duplicates: Math.round(accepted * 0.07), rejected: Math.round(accepted * 0.01), totalFen: accepted * 3_480 };
-          }
-          const form = new FormData();
-          form.set("source", source);
-          form.set("file", file);
-          return readJson<{ importId: string; accepted: number; duplicates: number; rejected: number; totalFen: number }>(await fetch("/api/imports/preview", { method: "POST", body: form }));
-        }}
-        onConfirm={async (preview) => {
-          if (demoMode) {
-            setSnapshot((current) => ({
-              ...current,
-              imports: current.imports.map((item) => item.source === importSource ? { ...item, transactionCount: item.transactionCount + preview.accepted, lastImportedAt: new Date().toISOString() } : item),
-              revision: current.revision + 1,
-            }));
-            showNotice(`${preview.accepted} transactions importées.`);
-            return;
-          }
-
-          setSyncState("syncing");
-          invalidatePendingRefresh();
-          try {
-            const mutationIdentity = `import-confirm:${preview.importId}`;
-            const response = await fetch(`/api/imports/${preview.importId}/confirm`, {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                "idempotency-key": idempotencyKeyFor(mutationIdentity),
-              },
-              body: "{}",
-            });
-            const payload = await readJson<{ message?: string }>(response);
-            mutationKeysRef.current.delete(mutationIdentity);
-            await refreshSnapshot(snapshot.scope, snapshot.selectedGroupId);
-            showNotice(payload.message ?? `${preview.accepted} transactions importées.`);
-          } catch (error) {
-            setSyncState("offline");
-            throw error;
-          }
-        }}
-      /> : null}
-      {dialog === "member" ? <AddMemberDialog open onOpenChange={(open) => setDialog(open ? "member" : null)} groupName={selectedGroup?.name ?? "ce tricount"} onInvite={inviteMember} /> : null}
-      {dialog === "budget" ? <BudgetDialog open onOpenChange={(open) => setDialog(open ? "budget" : null)} currentBudgetFen={snapshot.budgetFen} onSave={updateBudget} /> : null}
-      {dialog === "settlement" ? <SettlementDialog open onOpenChange={(open) => setDialog(open ? "settlement" : null)} member={selectedBalance} currentUserBalanceFen={currentUserBalanceFen} onSettle={settleBalance} /> : null}
+      {dialog === "group" ? (
+        <CreateGroupDialog
+          open
+          month={snapshot.period.key}
+          onOpenChange={(open) => setDialog(open ? "group" : null)}
+          onCreate={createGroup}
+        />
+      ) : null}
+      {dialog === "import" ? (
+        <ImportWalletDialog
+          open
+          onOpenChange={(open) => setDialog(open ? "import" : null)}
+          initialSource={importSource}
+          onPreview={async (source, file) => {
+            if (demoMode) {
+              const accepted = Math.max(8, Math.min(640, Math.round(file.size / 180)));
+              return {
+                importId: `demo-${source}-${Date.now()}`,
+                accepted,
+                duplicates: Math.round(accepted * 0.07),
+                rejected: Math.round(accepted * 0.01),
+                totalFen: accepted * 3_480,
+              };
+            }
+            const form = new FormData();
+            form.set("source", source);
+            form.set("file", file);
+            const response = await fetch("/api/imports/preview", { method: "POST", body: form });
+            return readJson<{
+              importId: string;
+              accepted: number;
+              duplicates: number;
+              rejected: number;
+              totalFen: number;
+            }>(response, copy.notices.serverError);
+          }}
+          onConfirm={async (preview) => {
+            if (demoMode) {
+              setSnapshot((current) => ({ ...current, revision: current.revision + 1 }));
+              showToast({ title: copy.notices.expenseAdded, status: "success" });
+              return;
+            }
+            setSyncState("syncing");
+            invalidatePendingRefresh();
+            try {
+              const mutationIdentity = `import-confirm:${preview.importId}`;
+              const response = await fetch(`/api/imports/${preview.importId}/confirm`, {
+                method: "POST",
+                headers: {
+                  "content-type": "application/json",
+                  "idempotency-key": idempotencyKeyFor(mutationIdentity),
+                },
+                body: "{}",
+              });
+              await readJson(response, copy.notices.serverError);
+              mutationKeysRef.current.delete(mutationIdentity);
+              await refreshSnapshot();
+              showToast({ title: copy.dialogs.import.complete, status: "success" });
+            } catch (error) {
+              setSyncState("offline");
+              throw error;
+            }
+          }}
+        />
+      ) : null}
+      {dialog === "member" ? (
+        <AddMemberDialog
+          open
+          onOpenChange={(open) => setDialog(open ? "member" : null)}
+          groupName={selectedGroup?.name ?? copy.scope.group}
+          onInvite={inviteMember}
+        />
+      ) : null}
+      {dialog === "budget" ? (
+        <BudgetDialog
+          open
+          onOpenChange={(open) => setDialog(open ? "budget" : null)}
+          currentBudgetFen={snapshot.budgetFen}
+          onSave={updateBudget}
+        />
+      ) : null}
+      {dialog === "settlement" ? (
+        <SettlementDialog
+          open
+          onOpenChange={(open) => setDialog(open ? "settlement" : null)}
+          member={selectedBalance}
+          currentUserBalanceFen={currentUserBalanceFen}
+          onSettle={settleBalance}
+        />
+      ) : null}
       {dialog === "share" ? (
         <ShareTransactionDialog
           open
@@ -1003,7 +897,7 @@ export function YearDashboard({ initialData, demoMode = false }: YearDashboardPr
           groups={snapshot.groups}
           selectedGroupId={snapshot.scope === "group" ? snapshot.selectedGroupId : undefined}
           onShare={async (groupId) => {
-            if (!selectedTransaction) throw new Error("Opération introuvable.");
+            if (!selectedTransaction) throw new Error(copy.notices.serverError);
             await shareTransaction(selectedTransaction, groupId);
           }}
         />
@@ -1012,222 +906,809 @@ export function YearDashboard({ initialData, demoMode = false }: YearDashboardPr
   );
 }
 
-function DashboardSidebar({
-  groups,
-  insight,
-  selectedGroupId,
-  scope,
-  open,
-  onClose,
-  onCreateGroup,
+function DesktopSidebar({
+  snapshot,
+  selectedGroup,
+  locale,
+  copy,
+  onPersonal,
   onSelectGroup,
-  onSelectPersonal,
-  onOpenWallet,
-  onOpenImports,
+  onCreateGroup,
+  onSignOut,
+  syncing,
 }: {
-  readonly groups: readonly DashboardGroup[];
-  readonly insight: DashboardSnapshot["busiestDay"];
-  readonly selectedGroupId?: string;
-  readonly scope: DashboardScope;
-  readonly open: boolean;
-  readonly onClose: () => void;
-  readonly onCreateGroup: () => void;
+  readonly snapshot: DashboardSnapshot;
+  readonly selectedGroup?: DashboardGroup;
+  readonly locale: "en" | "fr";
+  readonly copy: ReturnType<typeof useI18n>["messages"]["dashboard"];
+  readonly onPersonal: () => void;
   readonly onSelectGroup: (group: DashboardGroup) => void;
-  readonly onSelectPersonal: () => void;
-  readonly onOpenWallet: () => void;
-  readonly onOpenImports: () => void;
+  readonly onCreateGroup: () => void;
+  readonly onSignOut: () => void;
+  readonly syncing: boolean;
 }) {
   return (
-    <>
-      {open ? <button type="button" aria-label="Fermer la navigation" className="fixed inset-0 z-40 bg-[#102c25]/38 backdrop-blur-sm lg:hidden" onClick={onClose} /> : null}
-      <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 flex w-[224px] flex-col border-r border-[#e5e2d9] bg-[#eeede5] px-4 py-5 transition-transform duration-300 lg:translate-x-0",
-        open ? "translate-x-0" : "-translate-x-full",
-      )}>
-        <div className="flex items-center justify-between px-2">
-          <div className="flex items-center gap-3">
-            <Image src="/assets/fen-logo-mark-v2.png" alt="" width={40} height={40} className="size-10 rounded-[12px] object-cover shadow-[0_8px_20px_rgba(23,63,53,0.15)]" priority />
-            <div>
-              <p className="text-lg font-semibold leading-none tracking-[-0.05em]">Fēn</p>
-              <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.17em] text-[#87908b]">China money year</p>
-            </div>
-          </div>
-          <Button type="button" variant="ghost" size="icon-sm" onClick={onClose} className="rounded-lg lg:hidden" aria-label="Fermer"><X /></Button>
-        </div>
-
-        <nav className="mt-8" aria-label="Navigation principale">
-          <button
-            type="button"
-            onClick={onSelectPersonal}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-[14px] px-3 py-3 text-left text-sm font-semibold transition",
-              scope === "personal" ? "bg-[#173f35] text-white shadow-[0_10px_24px_rgba(23,63,53,0.14)]" : "text-[#68756e] hover:bg-white/60 hover:text-[#17352e]",
-            )}
-          >
-            <Home className="size-4" /> Mon année
-          </button>
-          <button type="button" onClick={onOpenWallet} className="mt-1 flex w-full items-center gap-3 rounded-[14px] px-3 py-3 text-left text-sm font-medium text-[#68756e] transition hover:bg-white/60 hover:text-[#17352e]">
-            <WalletCards className="size-4" /> Mon portefeuille
-          </button>
-          <button type="button" onClick={onOpenImports} className="mt-1 flex w-full items-center gap-3 rounded-[14px] px-3 py-3 text-left text-sm font-medium text-[#68756e] transition hover:bg-white/60 hover:text-[#17352e]">
-            <BookOpen className="size-4" /> Tous les imports
-          </button>
-        </nav>
-
-        <div className="mt-8 flex items-center justify-between px-2">
-          <p className="text-[10px] font-bold uppercase tracking-[0.17em] text-[#8a928d]">Mes tricounts</p>
-          <button type="button" onClick={onCreateGroup} className="grid size-7 place-items-center rounded-lg text-[#66756e] transition hover:bg-white hover:text-[#17352e]" aria-label="Créer un tricount"><Plus className="size-4" /></button>
-        </div>
-
-        <div className="mt-2 space-y-1.5">
-          {groups.map((group) => {
-            const active = scope === "group" && group.id === selectedGroupId;
-            return (
-              <button
-                key={group.id}
-                type="button"
-                onClick={() => onSelectGroup(group)}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-[15px] px-2.5 py-2.5 text-left transition",
-                  active ? "bg-white shadow-[0_8px_25px_rgba(44,54,45,0.07)]" : "hover:bg-white/55",
-                )}
-              >
-                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#173f35] text-white"><Users className="size-4" /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-semibold">{group.name}</span>
-                  <span className="mt-0.5 block truncate text-[10px] text-[#89918c]">{group.city} · {group.memberCount} pers.</span>
-                </span>
-                {active ? <span className="size-2 rounded-full" style={{ backgroundColor: group.accent }} /> : null}
-              </button>
-            );
-          })}
-        </div>
-
-        <button type="button" onClick={onCreateGroup} className="mt-3 flex w-full items-center gap-2 rounded-[14px] border border-dashed border-[#c8c8c0] px-3 py-3 text-xs font-semibold text-[#728078] transition hover:border-[#8fb466] hover:bg-white/55 hover:text-[#17352e]">
-          <Plus className="size-4" /> Nouveau tricount
-        </button>
-
-        <div className="mt-auto rounded-[18px] bg-[#dde8cf] p-4">
-          <div className="flex items-center gap-2 text-[#41633f]"><Sparkles className="size-4" /><span className="text-xs font-semibold">Conseil du mois</span></div>
-          <p className="mt-2 text-[11px] leading-5 text-[#647462]">
-            {insight
-              ? `${insight.label} est ton jour le plus dépensier avec ${formatAmount(insight.amountFen, true)} sur la période.`
-              : "Importe tes paiements pour faire ressortir les habitudes les plus utiles à suivre."}
+    <aside className="fixed inset-y-0 left-0 z-40 hidden w-[252px] flex-col border-r border-white/8 bg-[#173f35] px-4 py-5 text-white lg:flex">
+      <div className="flex items-center gap-3 px-2">
+        <Image
+          src="/assets/fen-logo-mark-v2.png"
+          alt=""
+          width={44}
+          height={44}
+          className="rounded-[15px]"
+        />
+        <div>
+          <p className="text-xl font-semibold tracking-[-0.05em]">Fēn</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-white/45">
+            {formatMonthKey(snapshot.period.key, locale, "long")}
           </p>
         </div>
-      </aside>
-    </>
+      </div>
+
+      <nav className="mt-8 space-y-1" aria-label={copy.navigation.overview}>
+        <SidebarButton
+          active={snapshot.scope === "personal"}
+          icon={WalletCards}
+          label={copy.navigation.personalWallet}
+          onClick={onPersonal}
+        />
+      </nav>
+
+      <div className="mt-7 flex items-center justify-between px-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/42">
+          {copy.navigation.groups}
+        </p>
+        <MotionButton
+          variant="ghost"
+          size="icon"
+          className="size-10 rounded-xl text-white/65 hover:bg-white/8 hover:text-white"
+          onClick={onCreateGroup}
+          aria-label={copy.navigation.addGroup}
+        >
+          <Plus className="size-4" />
+        </MotionButton>
+      </div>
+
+      <div className="mt-1 space-y-1 overflow-y-auto">
+        {snapshot.groups.map((group) => (
+          <button
+            key={group.id}
+            type="button"
+            onClick={() => onSelectGroup(group)}
+            className={cn(
+              "flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors",
+              snapshot.scope === "group" && selectedGroup?.id === group.id
+                ? "bg-white/11 text-white"
+                : "text-white/62 hover:bg-white/6 hover:text-white",
+            )}
+          >
+            <span className="size-2.5 shrink-0 rounded-full" style={{ background: group.accent }} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">{group.name}</span>
+              <span className="block truncate text-[11px] text-white/40">{group.memberCount} · {group.city}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-auto space-y-3 border-t border-white/9 pt-4">
+        <LanguageSwitcher className="w-full justify-center border-white/8 bg-white/7 shadow-none [&_button[aria-pressed='false']]:text-white/60 [&_button[aria-pressed='false']]:hover:bg-white/8 [&_button[aria-pressed='false']]:hover:text-white" />
+        <div className="flex items-center gap-3 rounded-2xl bg-white/[0.055] p-2.5">
+          <Avatar className="size-9 border border-white/12">
+            <AvatarImage src={snapshot.viewer.avatarUrl} alt="" />
+            <AvatarFallback className="bg-[#c9ff63] text-xs font-bold text-[#173f35]">
+              {initials(snapshot.viewer.name, locale)}
+            </AvatarFallback>
+          </Avatar>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-semibold">{snapshot.viewer.name}</span>
+            <span className="block truncate text-[10px] text-white/38">{snapshot.viewer.email}</span>
+          </span>
+          <MotionButton
+            variant="ghost"
+            size="icon"
+            className="size-10 rounded-xl text-white/52 hover:bg-white/8 hover:text-white"
+            onClick={onSignOut}
+            disabled={syncing}
+            aria-label={copy.account.signOut}
+          >
+            <LogOut className="size-4" />
+          </MotionButton>
+        </div>
+      </div>
+    </aside>
   );
 }
 
-function ImportButton({ source, onClick }: { readonly source: "wechat" | "alipay"; readonly onClick: () => void }) {
-  const isWechat = source === "wechat";
+function SidebarButton({
+  active,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  readonly active: boolean;
+  readonly icon: typeof WalletCards;
+  readonly label: string;
+  readonly onClick: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "flex h-10 items-center gap-2 rounded-xl px-3.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5",
-        isWechat ? "bg-[#07c160]" : "bg-[#1677ff]",
+        "flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 text-sm font-semibold transition-colors",
+        active ? "bg-[#c9ff63] text-[#173f35]" : "text-white/60 hover:bg-white/6 hover:text-white",
       )}
-      aria-label={`Importer depuis ${isWechat ? "WeChat Pay" : "Alipay"}`}
     >
-      {isWechat ? <SiWechat size={18} /> : <SiAlipay size={19} />}
-      {isWechat ? "WeChat Pay" : "Alipay"}
+      <Icon className="size-4.5" />
+      {label}
     </button>
   );
 }
 
-function TransactionRow({ transaction, onShare }: { readonly transaction: DashboardTransaction; readonly onShare: () => void }) {
-  const CategoryIcon = categoryIcons[transaction.category];
+function MonthControl({
+  month,
+  monthOptions,
+  locale,
+  copy,
+  onSelect,
+}: {
+  readonly month: string;
+  readonly monthOptions: readonly string[];
+  readonly locale: "en" | "fr";
+  readonly copy: ReturnType<typeof useI18n>["messages"]["dashboard"];
+  readonly onSelect: (month: string) => void;
+}) {
+  const current = currentMonthKey();
   return (
-    <article className="flex items-center gap-3 px-5 py-3.5 sm:px-6">
-      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#eeefe7] text-[#526b5b]"><CategoryIcon className="size-4" /></span>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <h3 className="truncate text-sm font-semibold">{transaction.title}</h3>
-          <span className={cn("shrink-0", transaction.source === "wechat" ? "text-[#07a953]" : transaction.source === "alipay" ? "text-[#1677ff]" : "text-[#76817b]")}>{sourceIcon(transaction.source, "size-3")}</span>
-        </div>
-        <p className="mt-1 truncate text-[10px] text-[#87908b]">{transaction.merchant} · {formatDate(transaction.occurredAt)}</p>
-      </div>
-      <div className="text-right">
-        <p className="text-sm font-semibold tabular-nums">−{formatAmount(transaction.amountFen, true)}</p>
-        {transaction.shared ? (
-          <p className="mt-1 text-[10px] font-semibold text-[#568147]">Partagée</p>
-        ) : transaction.source !== "manual" ? (
-          <button type="button" onClick={onShare} className="mt-1 text-[10px] font-semibold text-[#6a766f] underline decoration-[#aeb6b1] underline-offset-2 hover:text-[#3e6743]">Partager</button>
-        ) : <p className="mt-1 text-[10px] text-[#87908b]">Privée</p>}
-      </div>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" className="hidden rounded-lg sm:inline-flex" aria-label={`Actions pour ${transaction.title}`}><MoreHorizontal /></Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="rounded-xl border-[#deddd5] bg-[#fbfaf5] p-2">
-          {!transaction.shared && transaction.source !== "manual" ? <DropdownMenuItem className="rounded-lg" onSelect={onShare}><Users /> Partager dans le tricount</DropdownMenuItem> : null}
-          <DropdownMenuItem className="rounded-lg" disabled><PencilLine /> Catégorie modifiable bientôt</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </article>
-  );
-}
-
-function SyncStateBadge({ state, onRefresh }: { readonly state: "synced" | "syncing" | "offline"; readonly onRefresh: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onRefresh}
-      className={cn(
-        "hidden items-center gap-1.5 rounded-lg px-2.5 py-2 text-[10px] font-semibold md:flex",
-        state === "offline" ? "bg-[#fff0e8] text-[#a05233]" : "text-[#718078] hover:bg-white/60",
-      )}
-      aria-label="Actualiser les données"
-    >
-      {state === "offline" ? <CloudOff className="size-3.5" /> : state === "syncing" ? <RefreshCw className="size-3.5 animate-spin" /> : <span className="size-1.5 rounded-full bg-[#7dbf52]" />}
-      {state === "offline" ? "Hors ligne" : state === "syncing" ? "Synchro…" : "Synchronisé"}
-    </button>
-  );
-}
-
-function EmptyState({ title, description, compact = false }: { readonly title: string; readonly description: string; readonly compact?: boolean }) {
-  return (
-    <div className={cn("flex flex-col items-center justify-center px-5 text-center", compact ? "py-8" : "py-16")}>
-      <span className="grid size-9 place-items-center rounded-xl bg-[#eceee7] text-[#708078]"><FileUp className="size-4" /></span>
-      <p className="mt-3 text-sm font-semibold">{title}</p>
-      <p className="mt-1 max-w-xs text-xs leading-5 text-[#87908b]">{description}</p>
+    <div className="flex items-center gap-1">
+      <MotionButton
+        variant="ghost"
+        size="icon"
+        className="size-9 shrink-0 rounded-xl sm:size-10"
+        onClick={() => onSelect(shiftMonth(month, -1))}
+        aria-label={copy.month.previous}
+      >
+        <ChevronLeft className="size-4" />
+      </MotionButton>
+      <Select value={month} onValueChange={onSelect} className="w-[150px] sm:w-[172px]">
+        <SelectTrigger className="min-h-11 border-[#173f35]/10 bg-white/72 px-3 font-semibold shadow-sm">
+          <SelectValue placeholder={copy.month.label} />
+        </SelectTrigger>
+        <SelectContent className="max-h-72 overflow-y-auto">
+          {monthOptions.map((value) => (
+            <SelectItem key={value} value={value}>
+              {formatMonthTitle(value, locale)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <MotionButton
+        variant="ghost"
+        size="icon"
+        className="size-9 shrink-0 rounded-xl sm:size-10"
+        onClick={() => onSelect(shiftMonth(month, 1))}
+        disabled={month >= current}
+        aria-label={copy.month.next}
+      >
+        <ChevronRight className="size-4" />
+      </MotionButton>
     </div>
   );
 }
 
-function MeasuredChart({
-  height,
-  fallbackWidth,
-  children,
+function SyncButton({
+  state,
+  label,
+  onRefresh,
 }: {
-  readonly height: number;
-  readonly fallbackWidth: number;
-  readonly children: (width: number) => ReactNode;
+  readonly state: "synced" | "syncing" | "offline";
+  readonly label: string;
+  readonly onRefresh: () => void;
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(fallbackWidth);
+  const Icon = state === "offline" ? CloudOff : state === "synced" ? Check : RefreshCw;
+  return (
+    <MotionButton
+      variant="ghost"
+      size="icon"
+      className={cn(
+        "size-11 rounded-xl",
+        state === "offline" && "text-[#b14f38]",
+      )}
+      onClick={onRefresh}
+      disabled={state === "syncing"}
+      aria-label={label}
+    >
+      <Icon className={cn("size-4.5", state === "syncing" && "animate-spin")} />
+    </MotionButton>
+  );
+}
 
-  const measureRef = useCallback((node: HTMLDivElement | null) => {
-    containerRef.current = node;
-    if (node) setWidth(Math.max(1, Math.round(node.getBoundingClientRect().width)));
-  }, []);
+function HeroCard({
+  snapshot,
+  locale,
+  monthTitle,
+  copy,
+  remainingFen,
+  budgetRatio,
+  onSetBudget,
+}: {
+  readonly snapshot: DashboardSnapshot;
+  readonly locale: "en" | "fr";
+  readonly monthTitle: string;
+  readonly copy: ReturnType<typeof useI18n>["messages"]["dashboard"];
+  readonly remainingFen: number;
+  readonly budgetRatio: number;
+  readonly onSetBudget: () => void;
+}) {
+  const delta = snapshot.metrics.previousMonthDelta;
 
-  useEffect(() => {
-    const measure = () => {
-      if (containerRef.current) {
-        setWidth(Math.max(1, Math.round(containerRef.current.getBoundingClientRect().width)));
-      }
-    };
-    const frame = window.requestAnimationFrame(measure);
-    window.addEventListener("resize", measure);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener("resize", measure);
-    };
-  }, []);
+  return (
+    <article className="min-w-0 overflow-hidden rounded-[28px] bg-[#173f35] text-white shadow-[0_22px_60px_rgba(23,63,53,0.15)]">
+      <div className="px-5 pt-5 sm:px-7 sm:pt-7">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/48">
+              {copy.hero.spent} {monthTitle}
+            </p>
+            <NumberTicker
+              value={snapshot.spentFen / 100}
+              startOnView={false}
+              blur
+              format={(value) => new Intl.NumberFormat(getIntlLocale(locale), {
+                style: "currency",
+                currency: "CNY",
+                maximumFractionDigits: 0,
+              }).format(value)}
+              className="mt-3 text-[clamp(2.5rem,8vw,4.9rem)] font-semibold leading-none tracking-[-0.07em]"
+            />
+            <p className="mt-2 text-xs text-white/48">{formatCny(snapshot.spentFen, false, locale)}</p>
+          </div>
+          {delta !== null ? (
+            <span
+              aria-label={`${formatPercent(Math.abs(delta), locale)} ${copy.hero.comparedWithPrevious}`}
+              title={copy.hero.comparedWithPrevious}
+              className={cn(
+              "mt-1 inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-semibold",
+              delta <= 0 ? "bg-[#c9ff63]/14 text-[#d9ff92]" : "bg-[#ffad78]/14 text-[#ffc5a0]",
+              )}
+            >
+              {delta <= 0 ? <ArrowDownRight className="size-3.5" /> : <ArrowUpRight className="size-3.5" />}
+              {formatPercent(Math.abs(delta), locale)}
+            </span>
+          ) : null}
+        </div>
 
-  return <div ref={measureRef} style={{ height }}>{children(width)}</div>;
+        <DailySpendingChart
+          daily={snapshot.daily}
+          spentFen={snapshot.spentFen}
+          locale={locale}
+          copy={copy.charts}
+        />
+      </div>
+
+      <div className="border-t border-white/9 bg-black/6 px-5 py-4 sm:px-7">
+        {snapshot.budgetFen > 0 ? (
+          <button type="button" onClick={onSetBudget} className="block w-full text-left">
+            <div className="flex items-center justify-between gap-4 text-xs">
+              <span className="font-semibold text-white/72">{copy.hero.monthlyBudget}</span>
+              <span className="text-right tabular-nums text-white/58">
+                {remainingFen >= 0
+                  ? `${formatCny(remainingFen, true, locale)} ${copy.hero.remaining}`
+                  : `${formatCny(Math.abs(remainingFen), true, locale)} ${copy.hero.overBudget}`}
+              </span>
+            </div>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(100, budgetRatio * 100)}%` }}
+                className={cn("h-full rounded-full", budgetRatio > 1 ? "bg-[#ff9e68]" : "bg-[#c9ff63]")}
+              />
+            </div>
+          </button>
+        ) : (
+          <MotionButton
+            variant="ghost"
+            className="h-11 w-full justify-between rounded-xl px-0 text-white/70 hover:bg-transparent hover:text-white"
+            onClick={onSetBudget}
+          >
+            {copy.hero.noBudget}
+            <span className="font-semibold text-[#c9ff63]">{copy.hero.setBudget}</span>
+          </MotionButton>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function QuickActions({
+  copy,
+  onExpense,
+  onWechat,
+  onAlipay,
+  onGroup,
+}: {
+  readonly copy: ReturnType<typeof useI18n>["messages"]["dashboard"];
+  readonly onExpense: () => void;
+  readonly onWechat: () => void;
+  readonly onAlipay: () => void;
+  readonly onGroup: () => void;
+}) {
+  return (
+    <article className="rounded-[28px] border border-[#173f35]/8 bg-[#fffdf7] p-5 shadow-[0_16px_45px_rgba(23,63,53,0.07)] sm:p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6a786f]">{copy.actions.title}</p>
+      <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-1">
+        <QuickAction icon={PencilLine} label={copy.actions.addExpense} onClick={onExpense} primary />
+        <QuickAction icon={SiWechat} label={copy.actions.importWechat} onClick={onWechat} brand="wechat" />
+        <QuickAction icon={SiAlipay} label={copy.actions.importAlipay} onClick={onAlipay} brand="alipay" />
+        <QuickAction icon={Users} label={copy.actions.createGroup} onClick={onGroup} />
+      </div>
+    </article>
+  );
+}
+
+function QuickAction({
+  icon: Icon,
+  label,
+  onClick,
+  primary = false,
+  brand,
+}: {
+  readonly icon: typeof PencilLine;
+  readonly label: string;
+  readonly onClick: () => void;
+  readonly primary?: boolean;
+  readonly brand?: "wechat" | "alipay";
+}) {
+  return (
+    <MotionButton
+      variant={primary ? "primary" : "secondary"}
+      size="lg"
+      ripple={primary}
+      onClick={onClick}
+      className={cn(
+        "h-14 justify-start rounded-2xl px-2.5 text-left text-xs font-semibold sm:px-3.5 sm:text-[13px]",
+        !primary && "bg-white",
+      )}
+    >
+      <span className={cn(
+        "grid size-8 shrink-0 place-items-center rounded-xl",
+        primary && "bg-white/10",
+        brand === "wechat" && "bg-[#07c160]/12 text-[#07964c]",
+        brand === "alipay" && "bg-[#1677ff]/10 text-[#1677ff]",
+        !primary && !brand && "bg-[#edf0e8] text-[#436057]",
+      )}>
+        <Icon className="size-4" />
+      </span>
+      <span className="line-clamp-2 min-w-0 whitespace-normal leading-[1.15]">{label}</span>
+    </MotionButton>
+  );
+}
+
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  readonly icon: typeof Utensils;
+  readonly label: string;
+  readonly value: string;
+  readonly detail: string;
+  readonly tone: "lime" | "aqua" | "sand" | "peach";
+}) {
+  const tones = {
+    lime: "bg-[#edf6dc] text-[#46672d]",
+    aqua: "bg-[#e4f2ef] text-[#39746d]",
+    sand: "bg-[#f1ecdf] text-[#7b6743]",
+    peach: "bg-[#f8e9df] text-[#9b5f3d]",
+  };
+  return (
+    <article className="rounded-[22px] border border-[#173f35]/8 bg-[#fffdf8] p-4 shadow-[0_10px_32px_rgba(23,63,53,0.045)] sm:p-5">
+      <span className={cn("grid size-9 place-items-center rounded-xl", tones[tone])}>
+        <Icon className="size-4.5" />
+      </span>
+      <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#718078]">{label}</p>
+      <p className="mt-1.5 truncate text-xl font-semibold tracking-[-0.045em] tabular-nums sm:text-2xl">{value}</p>
+      <p className="mt-1 truncate text-xs text-[#7b8780]">{detail}</p>
+    </article>
+  );
+}
+
+function CategoryBreakdown({
+  snapshot,
+  locale,
+  copy,
+  selected,
+  onSelect,
+}: {
+  readonly snapshot: DashboardSnapshot;
+  readonly locale: "en" | "fr";
+  readonly copy: ReturnType<typeof useI18n>["messages"]["dashboard"];
+  readonly selected: TransactionCategory | "all";
+  readonly onSelect: (category: TransactionCategory) => void;
+}) {
+  const max = Math.max(...snapshot.categories.map((item) => item.amountFen), 1);
+  return (
+    <article className="rounded-[26px] border border-[#173f35]/8 bg-[#fffdf8] p-5 shadow-[0_12px_36px_rgba(23,63,53,0.05)] sm:p-6">
+      <CardHeading title={copy.charts.categories} description={copy.charts.categoriesDescription} />
+      <div className="mt-5 space-y-3">
+        {snapshot.categories.length ? snapshot.categories.map((item) => {
+          const Icon = categoryIcons[item.category];
+          return (
+            <button
+              key={item.category}
+              type="button"
+              onClick={() => onSelect(item.category)}
+              aria-pressed={selected === item.category}
+              className={cn(
+                "group block min-h-12 w-full rounded-xl px-2 py-1.5 text-left transition-colors",
+                selected === item.category ? "bg-[#edf3e5]" : "hover:bg-[#f1f0e9]",
+              )}
+            >
+              <span className="flex items-center gap-2.5">
+                <span className="grid size-7 place-items-center rounded-lg bg-[#f0efe8] text-[#617269]">
+                  <Icon className="size-3.5" />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold">{copy.categories[item.category]}</span>
+                <span className="text-xs font-semibold tabular-nums">{formatCny(item.amountFen, true, locale)}</span>
+              </span>
+              <span className="ml-9 mt-1.5 block h-1 overflow-hidden rounded-full bg-[#e5e3da]">
+                <motion.span
+                  initial={{ width: 0 }}
+                  animate={{ width: `${(item.amountFen / max) * 100}%` }}
+                  className="block h-full rounded-full"
+                  style={{ backgroundColor: categoryColors[item.category] }}
+                />
+              </span>
+            </button>
+          );
+        }) : (
+          <p className="py-10 text-center text-sm text-[#75817a]">{copy.metrics.noData}</p>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function TransactionsCard({
+  snapshot,
+  locale,
+  copy,
+  query,
+  onQueryChange,
+  filter,
+  onFilterChange,
+  transactions,
+  expanded,
+  onToggleExpanded,
+  onShare,
+}: {
+  readonly snapshot: DashboardSnapshot;
+  readonly locale: "en" | "fr";
+  readonly copy: ReturnType<typeof useI18n>["messages"]["dashboard"];
+  readonly query: string;
+  readonly onQueryChange: (value: string) => void;
+  readonly filter: TransactionCategory | "all";
+  readonly onFilterChange: (value: TransactionCategory | "all") => void;
+  readonly transactions: readonly DashboardTransaction[];
+  readonly expanded: boolean;
+  readonly onToggleExpanded: () => void;
+  readonly onShare: (transaction: DashboardTransaction) => void;
+}) {
+  const filters: Array<TransactionCategory | "all"> = [
+    "all",
+    ...snapshot.categories.map((item) => item.category),
+  ];
+  const filteredCount = snapshot.transactions.filter((item) => filter === "all" || item.category === filter).length;
+  return (
+    <article id="transactions" className="min-w-0 scroll-mt-24 rounded-[26px] border border-[#173f35]/8 bg-[#fffdf8] shadow-[0_12px_36px_rgba(23,63,53,0.05)]">
+      <div className="p-5 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <CardHeading title={copy.transactions.title} description={copy.transactions.description} />
+          <MotionInput
+            value={query}
+            onChange={onQueryChange}
+            placeholder={copy.transactions.search}
+            aria-label={copy.transactions.search}
+            leftIcon={<Search />}
+            className="w-full sm:w-64"
+            classNames={{
+              field: "h-11 rounded-xl border-[#173f35]/10 bg-white",
+              input: "text-base sm:text-sm",
+            }}
+          />
+        </div>
+
+        <div className="-mx-1 mt-4 overflow-x-auto px-1 pb-1">
+          <Tabs value={filter} onValueChange={(value) => onFilterChange(value as TransactionCategory | "all")} variant="pill">
+            <TabsList className="w-max bg-[#efeee7]">
+              {filters.map((category) => (
+                <TabsTrigger key={category} value={category} className="min-h-9 text-xs">
+                  {copy.categories[category]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
+      </div>
+
+      <div className="border-t border-[#173f35]/7">
+        {transactions.length ? transactions.map((transaction) => (
+          <TransactionRow
+            key={transaction.id}
+            transaction={transaction}
+            locale={locale}
+            copy={copy}
+            onShare={() => onShare(transaction)}
+          />
+        )) : (
+          <div className="grid min-h-40 place-items-center px-6 text-center text-sm text-[#738078]">
+            {copy.transactions.empty}
+          </div>
+        )}
+      </div>
+
+      {filteredCount > 6 ? (
+        <div className="border-t border-[#173f35]/7 p-3 text-center">
+          <MotionButton variant="ghost" className="min-h-11 rounded-xl" onClick={onToggleExpanded}>
+            {expanded ? copy.transactions.showLess : copy.transactions.showMore}
+          </MotionButton>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function TransactionRow({
+  transaction,
+  locale,
+  copy,
+  onShare,
+}: {
+  readonly transaction: DashboardTransaction;
+  readonly locale: "en" | "fr";
+  readonly copy: ReturnType<typeof useI18n>["messages"]["dashboard"];
+  readonly onShare: () => void;
+}) {
+  const Icon = categoryIcons[transaction.category];
+  return (
+    <div className="flex min-h-[76px] items-center gap-3 border-b border-[#173f35]/6 px-4 py-3 last:border-0 sm:px-6">
+      <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-[#efeee7] text-[#587067]">
+        <Icon className="size-4.5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold">{transaction.title}</span>
+          <span className="shrink-0 text-[#718078]">{sourceIcon(transaction.source)}</span>
+        </span>
+        <span className="mt-0.5 block truncate text-xs text-[#7b8780]">
+          {transaction.merchant || copy.categories[transaction.category]} · {formatDateTime(transaction.occurredAt, locale)}
+        </span>
+      </span>
+      <span className="shrink-0 text-right">
+        <span className="block text-sm font-semibold tabular-nums">{formatCny(transaction.amountFen, false, locale)}</span>
+        {transaction.shared ? (
+          <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-[#5f7d48]">
+            <Check className="size-3" /> {copy.transactions.shared}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onShare}
+            className="mt-1 inline-flex min-h-7 items-center gap-1 rounded-lg px-1.5 text-[11px] font-semibold text-[#536c62] hover:bg-[#edf1e7] hover:text-[#173f35]"
+          >
+            <Share2 className="size-3" /> {copy.transactions.share}
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function BalancesCard({
+  balances,
+  locale,
+  copy,
+  onInvite,
+  onSettle,
+}: {
+  readonly balances: readonly MemberBalance[];
+  readonly locale: "en" | "fr";
+  readonly copy: ReturnType<typeof useI18n>["messages"]["dashboard"];
+  readonly onInvite: () => void;
+  readonly onSettle: (member: MemberBalance) => void;
+}) {
+  return (
+    <article className="rounded-[26px] border border-[#173f35]/8 bg-[#fffdf8] p-5 shadow-[0_12px_36px_rgba(23,63,53,0.05)] sm:p-6">
+      <div className="flex items-start justify-between gap-3">
+        <CardHeading title={copy.balances.title} description={copy.balances.description} />
+        <MotionButton
+          variant="ghost"
+          size="icon"
+          className="size-11 rounded-xl"
+          onClick={onInvite}
+          aria-label={copy.balances.invite}
+        >
+          <UserPlus className="size-4" />
+        </MotionButton>
+      </div>
+      <div className="mt-5 space-y-2">
+        {balances.length ? balances.map((member) => (
+          <div key={member.id} className="flex min-h-14 items-center gap-3 rounded-2xl bg-[#f3f1e9] px-3 py-2.5">
+            <Avatar className="size-9">
+              <AvatarImage src={member.avatarUrl} alt="" />
+              <AvatarFallback className="bg-white text-xs font-bold text-[#365449]">
+                {initials(member.name, locale)}
+              </AvatarFallback>
+            </Avatar>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-semibold">{member.name}</span>
+              <span className={cn(
+                "block text-[11px] font-medium",
+                member.balanceFen > 0 ? "text-[#4e7a41]" : member.balanceFen < 0 ? "text-[#a45f3f]" : "text-[#7a867f]",
+              )}>
+                {member.balanceFen === 0
+                  ? copy.balances.settled
+                  : `${member.balanceFen > 0 ? copy.balances.receives : copy.balances.owes} ${formatCny(Math.abs(member.balanceFen), false, locale)}`}
+              </span>
+            </span>
+            {!member.isCurrentUser && member.balanceFen !== 0 ? (
+              <MotionButton variant="ghost" size="sm" className="min-h-10 rounded-xl px-2.5" onClick={() => onSettle(member)}>
+                {copy.balances.settle}
+              </MotionButton>
+            ) : null}
+          </div>
+        )) : (
+          <p className="py-8 text-center text-sm text-[#75817a]">{copy.balances.empty}</p>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function MobileMenuSheet({
+  open,
+  onOpenChange,
+  snapshot,
+  copy,
+  languageLabel,
+  onPersonal,
+  onSelectGroup,
+  onCreateGroup,
+  onSignOut,
+}: {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly snapshot: DashboardSnapshot;
+  readonly copy: ReturnType<typeof useI18n>["messages"]["dashboard"];
+  readonly languageLabel: string;
+  readonly onPersonal: () => void;
+  readonly onSelectGroup: (group: DashboardGroup) => void;
+  readonly onCreateGroup: () => void;
+  readonly onSignOut: () => void;
+}) {
+  return (
+    <BottomSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      snapPoints={[0.76, 0.92]}
+      title={copy.navigation.overview}
+      closeLabel={copy.navigation.closeMenu}
+    >
+      <div className="space-y-5 pt-2">
+        <button
+          type="button"
+          onClick={onPersonal}
+          className={cn(
+            "flex min-h-14 w-full items-center gap-3 rounded-2xl px-4 text-left text-sm font-semibold",
+            snapshot.scope === "personal" ? "bg-[#173f35] text-white" : "bg-[#efeee7]",
+          )}
+        >
+          <WalletCards className="size-5" />
+          {copy.navigation.personalWallet}
+        </button>
+
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#718078]">{copy.navigation.groups}</p>
+            <MotionButton variant="ghost" size="sm" className="min-h-10 rounded-xl" onClick={onCreateGroup}>
+              <Plus className="size-4" /> {copy.navigation.addGroup}
+            </MotionButton>
+          </div>
+          <div className="space-y-1">
+            {snapshot.groups.map((group) => (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => onSelectGroup(group)}
+                className={cn(
+                  "flex min-h-14 w-full items-center gap-3 rounded-2xl px-4 text-left",
+                  snapshot.scope === "group" && snapshot.selectedGroupId === group.id
+                    ? "bg-[#edf4df]"
+                    : "hover:bg-[#f1f0e9]",
+                )}
+              >
+                <span className="size-2.5 rounded-full" style={{ backgroundColor: group.accent }} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{group.name}</span>
+                  <span className="block text-xs text-[#75817a]">{group.city} · {group.memberCount}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t pt-4">
+          <span className="inline-flex items-center gap-2 text-xs font-semibold text-[#68776f]">
+            <Languages className="size-4" /> {languageLabel}
+          </span>
+          <LanguageSwitcher />
+        </div>
+        <MotionButton variant="outline" size="lg" className="w-full rounded-2xl" onClick={onSignOut}>
+          <LogOut className="size-4" /> {copy.account.signOut}
+        </MotionButton>
+      </div>
+    </BottomSheet>
+  );
+}
+
+function SheetAction({
+  icon: Icon,
+  label,
+  onClick,
+  brand,
+}: {
+  readonly icon: typeof PencilLine;
+  readonly label: string;
+  readonly onClick: () => void;
+  readonly brand?: "wechat" | "alipay";
+}) {
+  return (
+    <MotionButton
+      variant="secondary"
+      size="lg"
+      className="h-14 w-full justify-start rounded-2xl bg-white px-3.5"
+      onClick={onClick}
+    >
+      <span className={cn(
+        "grid size-9 place-items-center rounded-xl bg-[#edf0e8] text-[#436057]",
+        brand === "wechat" && "bg-[#07c160]/12 text-[#07964c]",
+        brand === "alipay" && "bg-[#1677ff]/10 text-[#1677ff]",
+      )}>
+        <Icon className="size-4.5" />
+      </span>
+      {label}
+    </MotionButton>
+  );
+}
+
+function CardHeading({ title, description }: { readonly title: string; readonly description: string }) {
+  return (
+    <div>
+      <h2 className="text-lg font-semibold tracking-[-0.035em]">{title}</h2>
+      <p className="mt-1 text-xs leading-5 text-[#738078]">{description}</p>
+    </div>
+  );
+}
+
+function sourceIcon(source: TransactionSource) {
+  if (source === "wechat") return <SiWechat className="size-3.5" aria-hidden />;
+  if (source === "alipay") return <SiAlipay className="size-3.5" aria-hidden />;
+  return <PencilLine className="size-3.5" aria-hidden />;
+}
+
+function formatMonthTitle(month: string, locale: "en" | "fr") {
+  const [year, monthNumber] = month.split("-").map(Number);
+  return new Intl.DateTimeFormat(getIntlLocale(locale), {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, monthNumber - 1, 1)));
+}
+
+function categoryPercent(snapshot: DashboardSnapshot, category: TransactionCategory, locale: "en" | "fr") {
+  const amount = snapshot.categories.find((item) => item.category === category)?.amountFen ?? 0;
+  return snapshot.spentFen > 0 ? formatPercent(amount / snapshot.spentFen, locale) : "0%";
 }

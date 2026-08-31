@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isMonthKey } from "@/lib/dashboard/period";
 import { inviteGroupMember } from "@/lib/server/dal";
 import { requireAuthenticatedUser } from "@/lib/server/auth-session";
 import { idempotentJson } from "@/lib/server/idempotent-json";
@@ -8,7 +9,10 @@ import { normalizeEmail } from "@/lib/server/private-signup-policy";
 import { requireSameOrigin, toErrorResponse } from "@/lib/server/request-security";
 import { getUiDashboardSnapshot } from "@/lib/server/ui-dashboard";
 
-const bodySchema = z.object({ email: z.email() });
+const bodySchema = z.object({
+  email: z.email(),
+  month: z.string().refine(isMonthKey, "Invalid month.").optional(),
+});
 
 export async function POST(
   request: Request,
@@ -33,20 +37,20 @@ export async function POST(
           email,
           idempotencyKey,
         });
-        const snapshot = await getUiDashboardSnapshot(viewer, "group", groupId);
+        const snapshot = await getUiDashboardSnapshot(viewer, "group", groupId, body.month);
 
         if (result.kind === "existing-user") {
           return {
             body: {
               snapshot,
-              message: `${email} a été ajouté au tricount.`,
+              message: `${email} was added to the group.`,
             },
             resourceType: "group_member",
             resourceId: result.membership.id,
           };
         }
 
-        const message = `Invitation privée créée pour ${email}.`;
+        const message = `Invitation created for ${email}.`;
         return {
           body: {
             snapshot,

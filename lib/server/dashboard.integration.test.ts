@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db/client", () => ({ getDb: vi.fn() }));
 
 import type { AppDatabase } from "@/lib/db/client";
+import { monthPeriod } from "@/lib/dashboard/period";
 import * as schema from "@/lib/db/schema";
 import {
   createMigratedSqliteDatabase,
@@ -62,6 +63,54 @@ describe("dashboard scope and all-time ledger integration", () => {
       { memberId: "member-1", balanceFen: 300 },
       { memberId: "member-2", balanceFen: -300 },
     ]);
+  });
+
+  it("loads only active total monthly budgets for the exact month plus a legacy annual fallback", async () => {
+    const august = monthPeriod("2026-08");
+    const july = monthPeriod("2026-07");
+    const annualFrom = Date.parse("2025-09-01T00:00:00+08:00");
+    const annualTo = Date.parse("2026-08-31T23:59:59.999+08:00");
+    const insert = sqlite.prepare(`
+      insert into budgets (
+        id, owner_user_id, group_id, name, category, period_type,
+        amount_fen, starts_at, ends_at, is_active
+      ) values (?, 'user-1', ?, ?, ?, ?, 120000, ?, ?, ?)
+    `);
+    insert.run("personal-month", null, "Personal month", null, "month", august.from.getTime(), august.to.getTime(), 1);
+    insert.run("personal-annual", null, "Personal annual", null, "year", annualFrom, annualTo, 1);
+    insert.run("personal-category", null, "Food", "food", "month", august.from.getTime(), august.to.getTime(), 1);
+    insert.run("personal-custom", null, "Custom", null, "custom", august.from.getTime(), august.to.getTime(), 1);
+    insert.run("personal-other-month", null, "July", null, "month", july.from.getTime(), july.to.getTime(), 1);
+    insert.run("personal-inactive", null, "Inactive", null, "month", august.from.getTime(), august.to.getTime(), 0);
+    insert.run("group-month", "group-1", "Group month", null, "month", august.from.getTime(), august.to.getTime(), 1);
+    insert.run("group-annual", "group-1", "Group annual", null, "year", annualFrom, annualTo, 1);
+    insert.run("group-category", "group-1", "Group food", "food", "month", august.from.getTime(), august.to.getTime(), 1);
+
+    const personal = await getDashboardSnapshot(
+      "user-1",
+      "personal",
+      undefined,
+      { from: august.from, to: august.to },
+      database,
+    );
+    const group = await getDashboardSnapshot(
+      "user-1",
+      "group",
+      "group-1",
+      { from: august.from, to: august.to },
+      database,
+    );
+
+    expect(personal.budgets.map(({ id }) => id).sort()).toEqual([
+      "personal-annual",
+      "personal-month",
+    ]);
+    expect(
+      group.group?.budgets
+        .filter(({ groupId }) => groupId === "group-1")
+        .map(({ id }) => id)
+        .sort(),
+    ).toEqual(["group-annual", "group-month"]);
   });
 });
 

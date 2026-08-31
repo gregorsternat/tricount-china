@@ -1,3 +1,10 @@
+import {
+  currentMonthKey,
+  dayCount,
+  isoDate,
+  monthKeysEndingAt,
+  monthPeriod,
+} from "@/lib/dashboard/period";
 import type {
   CategorySpend,
   DashboardGroup,
@@ -5,150 +12,52 @@ import type {
   DashboardSnapshot,
   DashboardTransaction,
   MemberBalance,
-  MonthlySpend,
 } from "@/lib/dashboard/types";
 
 const groups: readonly DashboardGroup[] = [
   {
     id: "beijing-flat",
-    name: "Coloc Beijing",
+    name: "Beijing flat",
     city: "北京",
     memberCount: 4,
-    spentFen: 1_426_970,
+    spentFen: 421_800,
     accent: "#c9ff63",
   },
   {
-    id: "semester-trips",
-    name: "Voyages du semestre",
+    id: "weekend-trips",
+    name: "Weekend trips",
     city: "中国",
     memberCount: 6,
-    spentFen: 809_860,
+    spentFen: 189_860,
     accent: "#ffb264",
   },
   {
-    id: "language-class",
-    name: "Classe de chinois",
+    id: "mandarin-class",
+    name: "Mandarin class",
     city: "北京",
     memberCount: 8,
-    spentFen: 234_540,
+    spentFen: 74_540,
     accent: "#8ed9cf",
   },
 ];
 
-const personalMonthly: readonly MonthlySpend[] = [
-  ["2025-09", "Sep", 164_220, 220_000],
-  ["2025-10", "Oct", 208_480, 220_000],
-  ["2025-11", "Nov", 176_360, 220_000],
-  ["2025-12", "Déc", 241_190, 220_000],
-  ["2026-01", "Jan", 286_740, 250_000],
-  ["2026-02", "Fév", 198_620, 220_000],
-  ["2026-03", "Mar", 210_980, 220_000],
-  ["2026-04", "Avr", 184_530, 220_000],
-  ["2026-05", "Mai", 203_890, 220_000],
-  ["2026-06", "Juin", 178_270, 220_000],
-  ["2026-07", "Juil", 245_430, 250_000],
-  ["2026-08", "Août", 286_056, 250_000],
-].map(([key, label, spentFen, budgetFen]) => ({
-  key: String(key),
-  label: String(label),
-  spentFen: Number(spentFen),
-  budgetFen: Number(budgetFen),
-  observed: true,
-}));
-
-const groupMonthly: readonly MonthlySpend[] = personalMonthly.map((month, index) => ({
-  ...month,
-  spentFen: Math.round(month.spentFen * (index % 3 === 0 ? 1.54 : 1.37)),
-  budgetFen: Math.round(month.budgetFen * 1.45),
-}));
-
-const personalCategories: readonly CategorySpend[] = [
-  { category: "food", label: "Restaurants & courses", amountFen: 704_612, color: "#173f35" },
-  { category: "housing", label: "Logement", amountFen: 596_192, color: "#8fcf52" },
-  { category: "travel", label: "Voyages", amountFen: 405_410, color: "#e9945e" },
-  { category: "transport", label: "Transports", amountFen: 333_867, color: "#8acac2" },
-  { category: "other", label: "Autres", amountFen: 544_685, color: "#e8dfce" },
+const personalCategoryAmounts: readonly CategorySpend[] = [
+  { category: "restaurant", amountFen: 78_400 },
+  { category: "groceries", amountFen: 64_000 },
+  { category: "housing", amountFen: 60_000 },
+  { category: "transport", amountFen: 28_000 },
+  { category: "leisure", amountFen: 18_000 },
+  { category: "shopping", amountFen: 16_000 },
+  { category: "other", amountFen: 21_656 },
 ];
 
-const groupCategories: readonly CategorySpend[] = [
-  { category: "housing", label: "Logement", amountFen: 1_084_000, color: "#173f35" },
-  { category: "food", label: "Restaurants & courses", amountFen: 806_240, color: "#8fcf52" },
-  { category: "travel", label: "Voyages", amountFen: 618_510, color: "#e9945e" },
-  { category: "transport", label: "Transports", amountFen: 411_870, color: "#8acac2" },
-  { category: "other", label: "Autres", amountFen: 755_602, color: "#e8dfce" },
-];
-
-const transactions: readonly DashboardTransaction[] = [
-  {
-    id: "tx-001",
-    title: "Hotpot du vendredi",
-    merchant: "海底捞火锅",
-    occurredAt: "2026-08-29T20:42:00+08:00",
-    amountFen: 36_800,
-    category: "food",
-    source: "wechat",
-    paidBy: "Gregor",
-    groupId: "beijing-flat",
-    shared: true,
-  },
-  {
-    id: "tx-002",
-    title: "Train pour Qingdao",
-    merchant: "中国铁路",
-    occurredAt: "2026-08-28T09:18:00+08:00",
-    amountFen: 27_200,
-    category: "travel",
-    source: "alipay",
-    paidBy: "Gregor",
-    groupId: "semester-trips",
-    shared: true,
-  },
-  {
-    id: "tx-003",
-    title: "Courses de la coloc",
-    merchant: "盒马鲜生",
-    occurredAt: "2026-08-27T18:11:00+08:00",
-    amountFen: 18_946,
-    category: "food",
-    source: "alipay",
-    paidBy: "Gregor",
-    groupId: "beijing-flat",
-    shared: false,
-  },
-  {
-    id: "tx-004",
-    title: "Didi vers Sanlitun",
-    merchant: "滴滴出行",
-    occurredAt: "2026-08-26T22:03:00+08:00",
-    amountFen: 5_490,
-    category: "transport",
-    source: "wechat",
-    paidBy: "Gregor",
-    shared: false,
-  },
-  {
-    id: "tx-005",
-    title: "Livres HSK 5",
-    merchant: "京东",
-    occurredAt: "2026-08-24T13:26:00+08:00",
-    amountFen: 12_860,
-    category: "shopping",
-    source: "wechat",
-    paidBy: "Gregor",
-    groupId: "language-class",
-    shared: false,
-  },
-  {
-    id: "tx-006",
-    title: "Café de quartier",
-    merchant: "Manner Coffee",
-    occurredAt: "2026-08-23T10:15:00+08:00",
-    amountFen: 2_800,
-    category: "food",
-    source: "alipay",
-    paidBy: "Gregor",
-    shared: false,
-  },
+const groupCategoryAmounts: readonly CategorySpend[] = [
+  { category: "housing", amountFen: 148_000 },
+  { category: "restaurant", amountFen: 104_800 },
+  { category: "groceries", amountFen: 82_000 },
+  { category: "transport", amountFen: 37_000 },
+  { category: "leisure", amountFen: 22_000 },
+  { category: "other", amountFen: 28_000 },
 ];
 
 const balances: readonly MemberBalance[] = [
@@ -158,12 +67,57 @@ const balances: readonly MemberBalance[] = [
   { id: "xiaoyu", name: "小雨", balanceFen: -23_870 },
 ];
 
-export function createDemoDashboard(scope: DashboardScope = "personal"): DashboardSnapshot {
+export function createDemoDashboard(
+  scope: DashboardScope = "personal",
+  month = currentMonthKey(),
+  requestedGroupId?: string,
+  now = new Date(),
+): DashboardSnapshot {
   const isPersonal = scope === "personal";
-  const monthly = isPersonal ? personalMonthly : groupMonthly;
-  const categories = isPersonal ? personalCategories : groupCategories;
-  const spentFen = monthly.reduce((total, month) => total + month.spentFen, 0);
-  const budgetFen = monthly.reduce((total, month) => total + month.budgetFen, 0);
+  const period = monthPeriod(month);
+  const categories = isPersonal ? personalCategoryAmounts : groupCategoryAmounts;
+  const spentFen = categories.reduce((total, category) => total + category.amountFen, 0);
+  const budgetFen = isPersonal ? 350_000 : 520_000;
+  const trendMultipliers = [0.71, 0.83, 0.76, 0.92, 0.86, 1];
+  const currentMonth = currentMonthKey(now);
+  const trend = monthKeysEndingAt(month, 6).map((key, index) => ({
+    key,
+    spentFen: Math.round(spentFen * (trendMultipliers[index] ?? 1)),
+    observed: key <= currentMonth,
+  }));
+  const observedDays = month < currentMonth
+    ? dayCount(month)
+    : month === currentMonth
+      ? Number(isoDate(now).slice(-2))
+      : 0;
+  const dailyWeights = [0.08, 0.04, 0.12, 0.05, 0.07, 0.11, 0.04, 0.09, 0.06, 0.13, 0.08, 0.13];
+  const daily = Array.from({ length: dayCount(month) }, (_, index) => {
+    const day = index + 1;
+    const weight = day <= observedDays ? (dailyWeights[index] ?? 0) : 0;
+    return {
+      key: `${month}-${String(day).padStart(2, "0")}`,
+      day,
+      spentFen: Math.round(spentFen * weight),
+      observed: day <= observedDays,
+    };
+  });
+  const dailyDifference = spentFen - daily.reduce((sum, day) => sum + day.spentFen, 0);
+  const lastObservedIndex = Math.min(observedDays, dailyWeights.length) - 1;
+  if (lastObservedIndex >= 0 && daily[lastObservedIndex]) {
+    daily[lastObservedIndex] = {
+      ...daily[lastObservedIndex],
+      spentFen: daily[lastObservedIndex].spentFen + dailyDifference,
+    };
+  }
+  const previousFen = trend.at(-2)?.spentFen ?? 0;
+  const restaurantSpendFen = categories.find((item) => item.category === "restaurant")?.amountFen ?? 0;
+  const groceriesSpendFen = categories.find((item) => item.category === "groceries")?.amountFen ?? 0;
+  const restaurantPaymentCount = isPersonal ? 11 : 8;
+  const elapsedDays = Math.max(1, observedDays);
+  const remainingDays = period.key === currentMonth
+    ? Math.max(1, dayCount(month) - elapsedDays + 1)
+    : 0;
+  const demoActivityDay = Math.max(1, Math.min(12, observedDays));
 
   return {
     viewer: {
@@ -174,35 +128,117 @@ export function createDemoDashboard(scope: DashboardScope = "personal"): Dashboa
     },
     scope,
     groups,
-    selectedGroupId: isPersonal ? undefined : "beijing-flat",
-    academicYear: {
-      label: "2025–2026",
-      startsOn: "2025-09-01",
-      endsOn: "2026-08-31",
+    selectedGroupId: isPersonal ? undefined : requestedGroupId ?? "beijing-flat",
+    period: {
+      key: month,
+      startsOn: period.startsOn,
+      endsOn: period.endsOn,
+      isCurrentMonth: period.key === currentMonthKey(),
     },
     spentFen,
     budgetFen,
-    previousPeriodDelta: isPersonal ? -0.084 : 0.036,
-    monthly,
+    metrics: {
+      previousMonthDelta: previousFen > 0 ? (spentFen - previousFen) / previousFen : null,
+      averageDailySpendFen: Math.round(spentFen / elapsedDays),
+      availablePerDayFen: remainingDays
+        ? Math.round(Math.max(0, budgetFen - spentFen) / remainingDays)
+        : null,
+      restaurantSpendFen,
+      restaurantPaymentCount,
+      averageRestaurantPaymentFen: Math.round(restaurantSpendFen / restaurantPaymentCount),
+      groceriesSpendFen,
+      legacyFoodSpendFen: 0,
+    },
+    trend,
+    daily,
     categories,
-    transactions: isPersonal
-      ? transactions
-      : transactions.filter((transaction) => transaction.groupId === "beijing-flat"),
+    transactions: demoTransactions(month, isPersonal, demoActivityDay),
     balances: isPersonal ? [] : balances,
     imports: [
-      { source: "wechat", transactionCount: 486, lastImportedAt: "2026-08-30T21:10:00+08:00" },
-      { source: "alipay", transactionCount: 318, lastImportedAt: "2026-08-30T21:13:00+08:00" },
+      { source: "wechat", transactionCount: 486, lastImportedAt: `${month}-${String(demoActivityDay).padStart(2, "0")}T21:10:00+08:00` },
+      { source: "alipay", transactionCount: 318, lastImportedAt: `${month}-${String(demoActivityDay).padStart(2, "0")}T21:13:00+08:00` },
     ],
     topMerchant: {
-      name: isPersonal ? "盒马鲜生" : "房东 · Lianjia",
-      amountFen: isPersonal ? 84_620 : 728_000,
-      visits: isPersonal ? 18 : 8,
+      name: isPersonal ? "盒马鲜生" : "Apartment utilities",
+      amountFen: isPersonal ? 46_200 : 74_000,
+      visits: isPersonal ? 7 : 2,
     },
-    busiestDay: {
-      label: "Samedi",
-      amountFen: isPersonal ? 421_650 : 613_420,
+    biggestDay: {
+      date: `${month}-${String(Math.min(10, demoActivityDay)).padStart(2, "0")}`,
+      amountFen: Math.round(spentFen * 0.13),
     },
-    generatedAt: "2026-08-31T09:00:00+08:00",
+    generatedAt: new Date().toISOString(),
     revision: 1,
   };
+}
+
+function demoTransactions(
+  month: string,
+  isPersonal: boolean,
+  observedDay: number,
+): readonly DashboardTransaction[] {
+  const date = (preferredDay: number, time: string) =>
+    `${month}-${String(Math.min(preferredDay, observedDay)).padStart(2, "0")}T${time}+08:00`;
+  const transactions: readonly DashboardTransaction[] = [
+    {
+      id: "tx-001",
+      title: "Friday hotpot",
+      merchant: "海底捞火锅",
+      occurredAt: date(12, "20:42:00"),
+      amountFen: 36_800,
+      category: "restaurant",
+      source: "wechat",
+      paidBy: "Gregor",
+      groupId: "beijing-flat",
+      shared: true,
+    },
+    {
+      id: "tx-002",
+      title: "Groceries",
+      merchant: "盒马鲜生",
+      occurredAt: date(10, "18:11:00"),
+      amountFen: 18_946,
+      category: "groceries",
+      source: "alipay",
+      paidBy: "Gregor",
+      groupId: "beijing-flat",
+      shared: false,
+    },
+    {
+      id: "tx-003",
+      title: "Didi to Sanlitun",
+      merchant: "滴滴出行",
+      occurredAt: date(8, "22:03:00"),
+      amountFen: 5_490,
+      category: "transport",
+      source: "wechat",
+      paidBy: "Gregor",
+      shared: false,
+    },
+    {
+      id: "tx-004",
+      title: "Coffee",
+      merchant: "Manner Coffee",
+      occurredAt: date(6, "10:15:00"),
+      amountFen: 2_800,
+      category: "leisure",
+      source: "alipay",
+      paidBy: "Gregor",
+      shared: false,
+    },
+    {
+      id: "tx-005",
+      title: "HSK books",
+      merchant: "京东",
+      occurredAt: date(4, "13:26:00"),
+      amountFen: 12_860,
+      category: "shopping",
+      source: "wechat",
+      paidBy: "Gregor",
+      shared: false,
+    },
+  ];
+  return isPersonal
+    ? transactions
+    : transactions.filter((transaction) => transaction.groupId === "beijing-flat");
 }

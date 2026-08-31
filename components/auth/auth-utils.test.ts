@@ -6,6 +6,7 @@ import {
   getAuthErrorMessage,
   safeRedirectPath,
 } from "./auth-utils";
+import { frMessages } from "@/lib/i18n/messages/fr";
 
 describe("auth route helpers", () => {
   it("keeps only same-origin relative redirects", () => {
@@ -36,12 +37,12 @@ describe("auth route helpers", () => {
         { status: 401, message: "User with that email does not exist" },
         "sign-in",
       ),
-    ).toBe("Email ou mot de passe incorrect.");
+    ).toBe("Incorrect email or password.");
   });
 
   it("distinguishes a network failure from invalid credentials", () => {
     expect(getAuthErrorMessage(new TypeError("Failed to fetch"), "sign-in")).toContain(
-      "Vérifie ta connexion",
+      "Check your connection",
     );
   });
 
@@ -51,6 +52,16 @@ describe("auth route helpers", () => {
         { status: 403, code: "INVITATION_REQUIRED" },
         "sign-up",
       ),
-    ).toContain("lien d’invitation");
+    ).toContain("invitation link");
+  });
+
+  it("uses the selected locale for safe auth errors", () => {
+    expect(
+      getAuthErrorMessage(
+        { status: 401, message: "Sensitive provider detail" },
+        "sign-in",
+        frMessages.auth.errors,
+      ),
+    ).toBe("Email ou mot de passe incorrect.");
   });
 });

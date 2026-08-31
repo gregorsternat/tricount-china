@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isMonthKey } from "@/lib/dashboard/period";
 import { createGroup, inviteGroupMember } from "@/lib/server/dal";
 import { requireAuthenticatedUser } from "@/lib/server/auth-session";
 import { idempotentJson } from "@/lib/server/idempotent-json";
@@ -11,8 +12,7 @@ import { normalizeEmail } from "@/lib/server/private-signup-policy";
 const bodySchema = z.object({
   name: z.string().trim().min(2).max(100),
   city: z.string().trim().min(1).max(100),
-  startsOn: z.iso.date(),
-  endsOn: z.iso.date(),
+  month: z.string().refine(isMonthKey, "Invalid month.").optional(),
   inviteEmails: z.array(z.email()).max(4).default([]),
 });
 
@@ -29,8 +29,6 @@ export async function POST(request: Request) {
         requestBody: body,
       },
       async (idempotencyKey) => {
-        const startsAt = new Date(`${body.startsOn}T00:00:00+08:00`);
-        const endsAt = new Date(`${body.endsOn}T23:59:59.999+08:00`);
         const group = await createGroup({
           ownerUserId: viewer.id,
           name: body.name,
@@ -38,9 +36,6 @@ export async function POST(request: Request) {
           color: "#c9ff63",
           baseCurrency: "CNY",
           timezone: "Asia/Shanghai",
-          academicYearLabel: `${body.startsOn.slice(0, 4)}–${body.endsOn.slice(0, 4)}`,
-          startsAt,
-          endsAt,
           idempotencyKey,
         });
 
@@ -63,13 +58,18 @@ export async function POST(request: Request) {
           }
         }
 
-        const snapshot = await getUiDashboardSnapshot(viewer, "group", group.id);
+        const snapshot = await getUiDashboardSnapshot(
+          viewer,
+          "group",
+          group.id,
+          body.month,
+        );
         const responseBody = {
           snapshot,
           invitationUrls,
           message: invitationUrls.length
-            ? `Tricount créé · ${invitationUrls.length} invitation${invitationUrls.length > 1 ? "s" : ""} à partager.`
-            : "Tricount créé.",
+            ? `Group created · ${invitationUrls.length} invitation${invitationUrls.length > 1 ? "s" : ""} ready to share.`
+            : "Group created.",
         };
         return {
           body: responseBody,

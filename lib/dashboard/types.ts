@@ -3,6 +3,8 @@ export type DashboardScope = "personal" | "group";
 export type TransactionSource = "wechat" | "alipay" | "manual";
 
 export type TransactionCategory =
+  | "restaurant"
+  | "groceries"
   | "food"
   | "transport"
   | "housing"
@@ -30,17 +32,20 @@ export interface DashboardGroup {
 
 export interface MonthlySpend {
   readonly key: string;
-  readonly label: string;
   readonly spentFen: number;
-  readonly budgetFen: number;
+  readonly observed: boolean;
+}
+
+export interface DailySpend {
+  readonly key: string;
+  readonly day: number;
+  readonly spentFen: number;
   readonly observed: boolean;
 }
 
 export interface CategorySpend {
   readonly category: TransactionCategory;
-  readonly label: string;
   readonly amountFen: number;
-  readonly color: string;
 }
 
 export interface DashboardTransaction {
@@ -72,21 +77,33 @@ export interface ImportAccountStatus {
   readonly lastImportedAt?: string;
 }
 
+export interface DashboardMetrics {
+  readonly previousMonthDelta: number | null;
+  readonly averageDailySpendFen: number | null;
+  readonly availablePerDayFen: number | null;
+  readonly restaurantSpendFen: number;
+  readonly restaurantPaymentCount: number;
+  readonly averageRestaurantPaymentFen: number | null;
+  readonly groceriesSpendFen: number;
+  readonly legacyFoodSpendFen: number;
+}
+
 export interface DashboardSnapshot {
   readonly viewer: DashboardUser;
   readonly scope: DashboardScope;
   readonly groups: readonly DashboardGroup[];
   readonly selectedGroupId?: string;
-  readonly academicYear: {
-    readonly label: string;
+  readonly period: {
+    readonly key: string;
     readonly startsOn: string;
     readonly endsOn: string;
+    readonly isCurrentMonth: boolean;
   };
   readonly spentFen: number;
   readonly budgetFen: number;
-  /** Null until a complete comparable prior period is available. */
-  readonly previousPeriodDelta: number | null;
-  readonly monthly: readonly MonthlySpend[];
+  readonly metrics: DashboardMetrics;
+  readonly trend: readonly MonthlySpend[];
+  readonly daily: readonly DailySpend[];
   readonly categories: readonly CategorySpend[];
   readonly transactions: readonly DashboardTransaction[];
   readonly balances: readonly MemberBalance[];
@@ -96,8 +113,8 @@ export interface DashboardSnapshot {
     readonly amountFen: number;
     readonly visits: number;
   } | null;
-  readonly busiestDay: {
-    readonly label: string;
+  readonly biggestDay: {
+    readonly date: string;
     readonly amountFen: number;
   } | null;
   readonly generatedAt: string;

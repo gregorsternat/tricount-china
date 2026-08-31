@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isMonthKey } from "@/lib/dashboard/period";
 import {
   createExpenseWithShares,
   createPersonalWalletTransaction,
@@ -17,6 +18,7 @@ const bodySchema = z.object({
   amountFen: z.number().int().positive().safe(),
   occurredAt: z.iso.datetime({ offset: true }),
   category: z.string().trim().min(1).max(80),
+  month: z.string().refine(isMonthKey, "Invalid month.").optional(),
   groupId: z.string().min(1).max(160).optional(),
   participantIds: z
     .array(z.string().min(1).max(160))
@@ -46,11 +48,11 @@ export async function POST(request: Request) {
             occurredAt: new Date(body.occurredAt),
             direction: "outflow",
             category: body.category,
-            merchant: "Saisie manuelle",
+            merchant: "Manual entry",
           });
-          const snapshot = await getUiDashboardSnapshot(viewer, "personal");
+          const snapshot = await getUiDashboardSnapshot(viewer, "personal", undefined, body.month);
           return {
-            body: { snapshot, message: "Dépense personnelle ajoutée." },
+            body: { snapshot, message: "Personal expense added." },
             status: created.created ? 201 : 200,
             resourceType: "wallet_transaction",
             resourceId: created.id,
@@ -69,30 +71,22 @@ export async function POST(request: Request) {
       },
       async (idempotencyKey) => {
         const raw = await getDashboardSnapshot(viewer.id, "group", groupId);
-        if (!raw.group) throw conflict("Le tricount sélectionné est introuvable.");
+        if (!raw.group) throw conflict("The selected group could not be found.");
         const occurredAt = new Date(body.occurredAt);
-        if (
-          (raw.group.startsAt && occurredAt < raw.group.startsAt) ||
-          (raw.group.endsAt && occurredAt > raw.group.endsAt)
-        ) {
-          throw conflict(
-            "La date de la dépense doit être comprise dans la période du tricount.",
-          );
-        }
         const payer = raw.group.members.find((member) => member.userId === viewer.id);
-        if (!payer) throw conflict("Ton compte n’est pas membre de ce tricount.");
+        if (!payer) throw conflict("Your account is not a member of this group.");
 
         const allowedMemberIds = new Set(raw.group.members.map((member) => member.id));
         const requestedMembers = body.participantIds.length
           ? [...new Set(body.participantIds)]
           : raw.group.members.map((member) => member.id);
         if (requestedMembers.some((memberId) => !allowedMemberIds.has(memberId))) {
-          throw conflict("Une personne sélectionnée ne fait plus partie du tricount.");
+          throw conflict("A selected participant is no longer in this group.");
         }
-        if (!requestedMembers.length) throw conflict("Ajoute au moins une personne.");
+        if (!requestedMembers.length) throw conflict("Add at least one participant.");
         if (requestedMembers.length > MAX_EXPENSE_SHARES) {
           throw conflict(
-            `Une dépense peut inclure au maximum ${MAX_EXPENSE_SHARES} personnes. Sélectionne un sous-groupe.`,
+            `An expense can include at most ${MAX_EXPENSE_SHARES} participants. Select a smaller group.`,
           );
         }
 
@@ -114,9 +108,9 @@ export async function POST(request: Request) {
           })),
         });
 
-        const snapshot = await getUiDashboardSnapshot(viewer, "group", groupId);
+        const snapshot = await getUiDashboardSnapshot(viewer, "group", groupId, body.month);
         return {
-          body: { snapshot, message: "Dépense ajoutée et soldes recalculés." },
+          body: { snapshot, message: "Expense added and balances updated." },
           status: 201,
           resourceType: "expense",
           resourceId: created.id,

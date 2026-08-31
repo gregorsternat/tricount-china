@@ -5,12 +5,16 @@ import {
   firstQueryValue,
   safeRedirectPath,
 } from "@/components/auth/auth-utils";
+import { getMessages } from "@/lib/i18n/server";
 
-export const metadata: Metadata = {
-  title: "Créer mon compte · Fēn",
-  description: "Crée ton compte privé Fēn et rejoins ton groupe.",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const messages = await getMessages();
+  return {
+    title: messages.metadata.join.title,
+    description: messages.metadata.join.description,
+    robots: { index: false, follow: false },
+  };
+}
 
 interface JoinPageProps {
   readonly searchParams: Promise<{
@@ -21,14 +25,15 @@ interface JoinPageProps {
 }
 
 export default async function JoinPage({ searchParams }: JoinPageProps) {
-  const params = await searchParams;
+  const [params, messages] = await Promise.all([searchParams, getMessages()]);
   const invitationToken = firstQueryValue(params.token)?.trim() || undefined;
+  const copy = messages.auth.join;
 
   return (
     <AuthShell
-      eyebrow="Bienvenue dans le groupe"
-      title="Crée ton espace privé."
-      description="Un seul compte suffit pour suivre tes dépenses personnelles et participer à tous tes tricounts."
+      eyebrow={copy.eyebrow}
+      title={copy.title}
+      description={copy.description}
     >
       <SignUpForm
         invitationToken={invitationToken}
