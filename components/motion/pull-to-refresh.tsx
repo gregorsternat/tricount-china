@@ -404,11 +404,13 @@ export function PullToRefresh({
   }, []);
 
   const startPointerPull = (event: ReactPointerEvent<HTMLElement>) => {
-    // Everything but touch: a finger is driven by the native listeners above,
-    // which can `preventDefault` the page scroll a passive React handler
-    // cannot. A pen fires no touch events at all, so this is its only route.
+    // Touch is driven by the native listeners above so it can prevent native
+    // scrolling only after a vertical pull is recognised. A pen fires no
+    // touch events, so it needs this pointer route. Mouse input must stay out:
+    // capturing a mouse pointer on this parent steals clicks from child
+    // controls and makes desktop interaction feel draggable.
     if (
-      event.pointerType === "touch" ||
+      event.pointerType !== "pen" ||
       event.button !== 0 ||
       event.currentTarget.scrollTop > 0 ||
       disabled ||
@@ -470,9 +472,8 @@ export function PullToRefresh({
         // only the pull itself suppresses selection, and only while it runs,
         // so dragging the page down cannot highlight it on the way.
         TOUCH_GESTURE_CONTENT_CLASS,
-        status === "pulling" || status === "ready"
-          ? "cursor-grabbing select-none"
-          : "cursor-grab",
+        (status === "pulling" || status === "ready") &&
+          "cursor-grabbing select-none",
         (disabled || isRefreshing) && "cursor-default",
         className,
       )}

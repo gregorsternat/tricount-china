@@ -595,6 +595,7 @@ export function YearDashboard({ initialData, demoMode = false }: YearDashboardPr
           releaseLabel={copy.sync.release}
           refreshingLabel={copy.sync.refreshing}
           ariaLabel={copy.sync.refresh}
+          className="lg:h-[calc(100dvh-4rem)]"
           contentClassName="min-h-[calc(100dvh-4rem)]"
         >
           <motion.div
